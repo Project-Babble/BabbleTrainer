@@ -23,4 +23,5 @@ jobs:
           spec: 'trainermin.spec'
           python_ver: '3.12.8'
           requirements: 'requirements.txt'
-          upload_exe_with_name: 'BabbleTrainer'
+          upload_exe_with_name: 'Windows'
+          options: '--onefile'
