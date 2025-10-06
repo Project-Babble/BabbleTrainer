@@ -3,3 +3,4 @@ torch
 numpy
 opencv-python
 pillow
+torch-directml; platform_system == "Windows"

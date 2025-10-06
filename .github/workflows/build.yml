@@ -4,12 +4,18 @@ on:
   workflow_dispatch:
     
 jobs:
-  build-windows:
+  build:
     defaults:
       run:
         shell: bash
     
-    runs-on: windows-2022
+    strategy:
+      matrix:
+        include:
+          - { result: Linux, runs-on: ubuntu-22.04 }
+          - { result: Windows, runs-on: windows-2022 }
+    
+    runs-on: ${{ matrix.runs-on }}
     
     steps:
       - name: Checkout latest
@@ -23,25 +29,4 @@ jobs:
           spec: 'BabbleTrainer.spec'
           python_ver: '3.12.8'
           requirements: 'requirements.txt'
-          upload_exe_with_name: 'Windows'
-
-  build-linux:
-    defaults:
-      run:
-        shell: bash
-    
-    runs-on: ubuntu-20.04
-    
-    steps:
-      - name: Checkout latest
-        uses: actions/checkout@v5
-        with:
-          submodules: 'recursive'
-
-      - name: Create Executable
-        uses: sayyid5416/pyinstaller@v1
-        with:
-          spec: 'BabbleTrainer.spec'
-          python_ver: '3.12.8'
-          requirements: 'requirements.txt'
-          upload_exe_with_name: 'Linux'
+          upload_exe_with_name: ${{ matrix.result }}
