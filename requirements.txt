@@ -1,6 +1,6 @@
-onnx
-torch+cpu
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.4.1
 numpy
 opencv-python
 pillow
-torch-directml; platform_system == "Windows"
+onnx
