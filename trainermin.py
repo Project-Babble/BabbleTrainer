@@ -1,5 +1,4 @@
 import torch
-import torch_directml
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
@@ -10,6 +9,8 @@ import cv2
 import time
 import sys
 import bisect
+if sys.platform == 'win32':
+    import torch_directml
 import onnx
 from collections import deque
 from PIL import Image, ImageFile
@@ -29,7 +30,7 @@ DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is
 
 DEVICE = "cpu"
 
-if DEVICE != "mps" and DEVICE != "cuda":
+if DEVICE != "mps" and DEVICE != "cuda" and sys.platform == 'win32':
     try:
         DEVICE = torch_directml.device(0)
     except: DEVICE = "cpu"
