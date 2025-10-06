@@ -1,6 +1,5 @@
 onnx
---find-links https://download.pytorch.org/whl/cpu
-torch
+torch+cpu
 numpy
 opencv-python
 pillow
