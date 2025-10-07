@@ -1,10 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
 
+Binaries = []
+
+if sys.platform == 'win32':
+    from PyInstaller.utils.hooks import collect_dynamic_libs
+    Binaries = collect_dynamic_libs('torch_directml')
 
 a = Analysis(
     ['trainermin.py'],
     pathex=[],
-    binaries=[],
+    binaries=Binaries,
     datas=[],
     hiddenimports=[],
     hookspath=[],
