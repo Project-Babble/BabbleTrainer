@@ -2,6 +2,8 @@
 
 Binaries = []
 
+import sys
+
 if sys.platform == 'win32':
     from PyInstaller.utils.hooks import collect_dynamic_libs
     Binaries = collect_dynamic_libs('torch_directml')
