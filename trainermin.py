@@ -883,7 +883,7 @@ class CaptureDataset(Dataset):
         pitchesR, yawsR = [], []
         pitches, yaws = [], []
 
-        c_max = 0
+        c_max = 1 # TODO: THIS WAS ZERO, DOES THIS BREAK?
         for frame in self.aligned_frames:
             lbl = frame[0]
             pitchesL.append(lbl[5])   # routine_pitch
