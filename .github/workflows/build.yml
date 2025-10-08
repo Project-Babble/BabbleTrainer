@@ -2,6 +2,18 @@ name: Build
 
 on:
   workflow_dispatch:
+    inputs:
+      publish-release:
+        description: 'Publish Release'
+        type: boolean
+        default: false
+      publish-pre-release:
+        description: 'Mark as Pre-Release'
+        type: boolean
+        default: false
+      version-number:
+        description: 'Version Number for Release'
+        type: string
     
 jobs:
   build:
@@ -30,3 +42,37 @@ jobs:
           python_ver: '3.12.8'
           requirements: 'requirements.txt'
           upload_exe_with_name: ${{ matrix.result }}
+          
+  release:
+    needs: build
+    if: ${{ github.event.inputs.publish-release == 'true' }}
+    defaults:
+      run:
+        shell: bash
+    
+    runs-on: ubuntu-22.04
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Windows
+          path: ./artifacts/windows
+
+      - name: Download Linux artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Linux
+          path: ./artifacts/linux
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/windows/trainermin.exe
+            artifacts/linux/trainermin
+          tag_name: ${{ github.event.inputs.version-number }}
+          prerelease: ${{ github.event.inputs.publish-pre-release }}
