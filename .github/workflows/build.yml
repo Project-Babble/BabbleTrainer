@@ -67,6 +67,11 @@ jobs:
         with:
           name: Linux
           path: ./artifacts/linux
+          
+      - name: Debug
+        run: |
+          ls artifacts/linux
+          ls artifacts/windows
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
