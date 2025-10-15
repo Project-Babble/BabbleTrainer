@@ -1321,7 +1321,7 @@ def main():
 
     if True:
         for e in range(1):
-            dataset = CaptureDataset('user_cal.bin', all_frames=False, side='left')
+            dataset = CaptureDataset(sys.argv[1], all_frames=False, side='left')
 
             train_dataset = dataset
             train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=0)
@@ -1357,7 +1357,7 @@ def main():
         TRAINING = True
 
         for e in range(1):
-            dataset = CaptureDataset('user_cal.bin', all_frames=False, side='right')
+            dataset = CaptureDataset(sys.argv[1], all_frames=False, side='right')
 
             train_dataset = dataset
             train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=0)
