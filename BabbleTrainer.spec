@@ -9,7 +9,7 @@ if sys.platform == 'win32':
     Binaries = collect_dynamic_libs('torch_directml')
 
 a = Analysis(
-    ['trainermin.py'],
+    ['main.py'],
     pathex=[],
     binaries=Binaries,
     datas=[],
