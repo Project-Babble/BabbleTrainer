@@ -3,10 +3,12 @@ import functools
 import time
 import random
 
-import torch_directml
-import babble_data
-
-device = torch_directml.device()
+device = "cpu"
+try:
+    import torch_directml
+    device = torch_directml.device()
+except:
+    device = "cpu"
 
 FLAG_GAZE_DATA = 1 << 0
 MODEL_NAMES = ["gaze", "blink", "widesqueeze", "brow"]
