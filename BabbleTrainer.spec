@@ -7,7 +7,7 @@ import sys
 if sys.platform == 'win32':
     import os
     from PyInstaller.utils.hooks import collect_dynamic_libs
-    Binaries = collect_dynamic_libs('torch_directml') + [os.path.abspath("babble_data_win/opencv_world4100.dll"),]
+    Binaries = collect_dynamic_libs('torch_directml') + [("babble_data_win/opencv_world4100.dll", '.'),]
     print(Binaries)
 
 a = Analysis(
