@@ -816,7 +816,7 @@ class CaptureDataset(Dataset):
         self.aligned_frames_eyes_closed = []
         self.aligned_frames_eyes_squinted = []
         self.aligned_frames_eyes_wide = []
-        self.aligned_frames_brow_lowered = []
+        self.aligned_frames_brow_raised = []
 
         random.shuffle(self.aligned_frames)
 
@@ -835,7 +835,7 @@ class CaptureDataset(Dataset):
             elif routine_widen > 0.5:
                 self.aligned_frames_eyes_wide.append(i)
             elif routine_brow_angry > 0.5:
-                self.aligned_frames_brow_lowered.append(i)
+                self.aligned_frames_brow_raised.append(i)
 
 
         # Guard against degenerate case (all equal)
@@ -854,40 +854,35 @@ class CaptureDataset(Dataset):
         self.use_count_closed = np.zeros((len(self.aligned_frames_eyes_closed),), dtype=np.int64)
         self.use_count_squint = np.zeros((len(self.aligned_frames_eyes_squinted),), dtype=np.int64)
         self.use_count_wide = np.zeros((len(self.aligned_frames_eyes_wide),), dtype=np.int64)
-        self.use_count_angry = np.zeros((len(self.aligned_frames_brow_lowered),), dtype=np.int64)
+        self.use_count_angry = np.zeros((len(self.aligned_frames_brow_raised),), dtype=np.int64)
 
     def __len__(self):
         return len(self.aligned_frames)
     
     def get_next_gaze(self):
-        min_val = np.min(self.use_count_gaze)
-        target = random.choice(np.where(self.use_count_gaze == min_val)[0])
+        target = np.argmin(self.use_count_gaze)
         self.use_count_gaze[target] += 1
-        return self.__getitem__(self.aligned_frames_gaze[target])
+        return self.__getitem__(target)
     
     def get_next_squint(self):
-        min_val = np.min(self.use_count_squint)
-        target = random.choice(np.where(self.use_count_squint == min_val)[0])
+        target = np.argmin(self.use_count_squint)
         self.use_count_squint[target] += 1
-        return self.__getitem__(self.aligned_frames_eyes_squinted[target])
+        return self.__getitem__(target)
 
     def get_next_closed(self):
-        min_val = np.min(self.use_count_closed)
-        target = random.choice(np.where(self.use_count_closed == min_val)[0])
+        target = np.argmin(self.use_count_closed)
         self.use_count_closed[target] += 1
-        return self.__getitem__(self.aligned_frames_eyes_closed[target])
+        return self.__getitem__(target)
     
     def get_next_wide(self):
-        min_val = np.min(self.use_count_wide)
-        target = random.choice(np.where(self.use_count_wide == min_val)[0])
+        target = np.argmin(self.use_count_wide)
         self.use_count_wide[target] += 1
-        return self.__getitem__(self.aligned_frames_eyes_wide[target])
+        return self.__getitem__(target)
     
     def get_next_angry(self):
-        min_val = np.min(self.use_count_angry)
-        target = random.choice(np.where(self.use_count_angry == min_val)[0])
+        target = np.argmin(self.use_count_angry)
         self.use_count_angry[target] += 1
-        return self.__getitem__(self.aligned_frames_brow_lowered[target])
+        return self.__getitem__(target)
     
     def __getitem__(self, idx):
         # Extract data from the aligned frame
@@ -1129,9 +1124,8 @@ class DatasetWrapper(Dataset):
 
     def __getitem__(self, index):
         return self.batcher_fn(self.train_loader) #self.batcher_fn()
-
-
-def worker_init_with_file(worker_id, file):
+    
+def worker_init(worker_id):
     worker_info = torch.utils.data.get_worker_info()
     dataset = worker_info.dataset
     #print(worker_id)
@@ -1139,7 +1133,43 @@ def worker_init_with_file(worker_id, file):
     np.random.seed(worker_id)
     random.seed(worker_id)
     time.sleep(1)
-    dataset.train_loader = CaptureDataset(file, all_frames=False)
+    dataset.train_loader = CaptureDataset('G:\\Baballonia.Setup.v1.1.0.8\\user_cal.bin', all_frames=False)
+
+
+def batcher_gaze(train_loader):
+    return train_loader.get_next_gaze()
+
+def batcher_lid(train_loader): #todo better weighting just threw this together
+    f = random.random()
+    if f > 0.5:
+        if f < 0.75:
+            if f < 0.6:
+                return train_loader.get_next_gaze()
+            else:
+                return train_loader.get_next_angry()
+        elif f > 0.875:
+            return train_loader.get_next_wide()
+        else:
+            return train_loader.get_next_squint()
+    else:
+        return train_loader.get_next_closed()
+    #return train_loader.get_next_gaze() if random.random() > 0.5 else train_loader.get_next_closed()
+
+def batcher_wide_squeeze(train_loader):
+    f = random.random()
+    if f > 0.5:
+        return train_loader.get_next_gaze()
+    elif f > 0.25:
+        return train_loader.get_next_wide()
+    else:
+        return train_loader.get_next_squint()
+    
+def batcher_brow(train_loader):
+    f = random.random()
+    if f > 0.5:
+        return batcher_wide_squeeze(train_loader)
+    else:
+        return train_loader.get_next_angry()
 
 # Constants
 FLOAT_TO_INT_CONSTANT = 1
@@ -1152,3 +1182,395 @@ TRAINING = True
 
 # Optimized alignment parameters
 WIN_SIZE_MUL = 10  # Window size multiplier for perfect accuracy
+
+DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
+
+DEVICE = "cuda"
+
+MODEL_NAMES = ["gaze", "blink", "widesqueeze", "brow"]
+
+
+if __name__ == "__main__":
+    import torch
+    import torch.nn as nn
+    import torch.optim as optim
+    from torch.utils.data import Dataset, DataLoader
+    from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
+    import numpy as np
+    import struct
+    import cv2
+    import time
+    import sys
+    import bisect
+    import onnx
+    import random
+    from collections import deque
+    from PIL import Image, ImageFile
+    from tqdm import tqdm
+
+    class MicroChad(nn.Module):
+        def __init__(self, out_count=2):
+            super(MicroChad, self).__init__()
+            self.conv1 = nn.Conv2d(4, 28//2, kernel_size=3, stride=1, padding=1)
+            self.conv2 = nn.Conv2d(28//2, 42//2, kernel_size=3, stride=1, padding=1)
+            self.conv3 = nn.Conv2d(42//2, 32, kernel_size=3, stride=1, padding=1)
+            self.conv4 = nn.Conv2d(32, 94//2, kernel_size=3, stride=1, padding=1)
+            self.conv5 = nn.Conv2d(94//2, 70, kernel_size=3, stride=1, padding=1)
+            self.conv6 = nn.Conv2d(70, 212//2, kernel_size=3, stride=1, padding=1)
+            self.fc_gaze = nn.Linear(212//2, out_count)
+            #self.fc_exp = nn.Linear(212, 1)
+
+            self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+            self.adaptive = nn.AdaptiveMaxPool2d(output_size=1)
+
+            self.act = nn.ReLU(inplace=True)
+            self.sigmoid = nn.Sigmoid()
+
+        def forward(self, x, return_blends=True):
+            x = self.conv1(x)
+            x = self.act(x)
+            x = self.pool(x)
+
+            x = self.conv2(x)
+            x = self.act(x)
+            x = self.pool(x)
+
+            x = self.conv3(x)
+            x = self.act(x)
+            x = self.pool(x)
+
+            x = self.conv4(x)
+            x = self.act(x)
+            x = self.pool(x)
+
+            x = self.conv5(x)
+            x = self.act(x)
+            x = self.pool(x)
+
+            x = self.conv6(x)
+            x = self.act(x)
+
+            x = self.adaptive(x)
+            x = torch.flatten(x, 1)
+
+            #y = self.fc_exp(x)
+            #y = self.sigmoid(y)
+
+            #if not return_blends:
+            #    return x
+            
+            x = self.fc_gaze(x)
+            x = self.sigmoid(x)
+
+            #x = torch.cat([x, y], dim=-1)
+
+            return x
+
+    class MultiInputMergedMicroChad(nn.Module):
+        def __init__(self, left_models, right_models):
+            super(MultiInputMergedMicroChad, self).__init__()
+
+            if not left_models or not right_models:
+                raise ValueError("Model lists for both left and right inputs cannot be empty.")
+
+            self.all_models = left_models + right_models
+            self.num_models = len(self.all_models)
+            self.num_left = len(left_models)
+            self.num_right = len(right_models)
+            self.original_model_ref = self.all_models[0]
+
+            # --- Create merged convolutional layers with input routing logic ---
+            self._create_merged_conv_layers(left_models, right_models)
+
+            # --- Store the final classification layers separately ---
+            self.final_layers = nn.ModuleList(
+                [model.fc_gaze for model in self.all_models]
+            )
+
+            # --- Define shared, parameter-less layers ---
+            self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+            self.adaptive = nn.AdaptiveMaxPool2d(output_size=1)
+            self.act = nn.ReLU(inplace=True)
+            self.sigmoid = nn.Sigmoid()
+
+        def _create_merged_conv_layers(self, left_models, right_models):
+            """Merges conv layers, with special handling for conv1 to route inputs."""
+            
+            conv_layer_names = [name for name, module in self.original_model_ref.named_modules() if isinstance(module, nn.Conv2d)]
+
+            for i, layer_name in enumerate(conv_layer_names):
+                # Get layers from all models for merging
+                all_original_layers = [getattr(model, layer_name) for model in self.all_models]
+                out_c, in_c, k_h, k_w = all_original_layers[0].weight.shape
+                
+                if i == 0:
+                    # --- SPECIAL HANDLING FOR THE FIRST CONV LAYER ---
+                    # This layer will perform the input routing.
+                    groups = 1 # It's a single, custom-built convolution
+                    
+                    # The merged layer will take all input channels (e.g., 4+4=8)
+                    new_in_c = in_c * 2 # Assuming two input streams (left, right)
+                    # The output channels are the sum of all model outputs
+                    new_out_c = out_c * self.num_models
+
+                    # Build the block-diagonal weight matrix for input routing
+                    merged_weight = torch.zeros(new_out_c, new_in_c, k_h, k_w)
+                    
+                    # Get weights for left and right models separately
+                    left_conv1_layers = [model.conv1 for model in left_models]
+                    right_conv1_layers = [model.conv1 for model in right_models]
+
+                    # Concatenate weights for each stream
+                    left_weights = torch.cat([layer.weight.data for layer in left_conv1_layers], dim=0)
+                    right_weights = torch.cat([layer.weight.data for layer in right_conv1_layers], dim=0)
+                    
+                    # Place left weights in the top-left block of the matrix
+                    # It will process the first 4 input channels (0:in_c)
+                    merged_weight[0:self.num_left*out_c, 0:in_c, :, :] = left_weights
+
+                    # Place right weights in the bottom-right block of the matrix
+                    # It will process the last 4 input channels (in_c:)
+                    merged_weight[self.num_left*out_c:, in_c:, :, :] = right_weights
+
+                    # Biases can just be concatenated as they are applied after the routing
+                    merged_bias = torch.cat([layer.bias.data for layer in all_original_layers], dim=0)
+
+                else:
+                    # --- SUBSEQUENT CONV LAYERS ---
+                    # Use grouped convolutions for efficiency and separation.
+                    groups = self.num_models
+                    new_in_c = in_c * self.num_models
+                    new_out_c = out_c * self.num_models
+                    
+                    merged_weight = torch.cat([layer.weight.data for layer in all_original_layers], dim=0)
+                    merged_bias = torch.cat([layer.bias.data for layer in all_original_layers], dim=0)
+
+                # Create the new, wider Conv2D layer
+                merged_layer = nn.Conv2d(new_in_c, new_out_c, (k_h, k_w),
+                                        stride=all_original_layers[0].stride,
+                                        padding=all_original_layers[0].padding,
+                                        groups=groups)
+                
+                merged_layer.weight.data = merged_weight
+                merged_layer.bias.data = merged_bias
+                setattr(self, layer_name, merged_layer)
+
+        def forward(self, x):
+            # The forward pass is simple because conv1 handles the routing.
+            x = self.act(self.conv1(x))
+            x = self.pool(x)
+
+            x = self.act(self.conv2(x))
+            x = self.pool(x)
+
+            x = self.act(self.conv3(x))
+            x = self.pool(x)
+            
+            x = self.act(self.conv4(x))
+            x = self.pool(x)
+
+            x = self.act(self.conv5(x))
+            x = self.pool(x)
+
+            x = self.act(self.conv6(x))
+            
+            x = self.adaptive(x)
+            x = torch.flatten(x, 1)
+
+            # Split the final feature vector and pass to respective heads
+            outputs = []
+            chunk_size = self.original_model_ref.conv6.out_channels
+            feature_chunks = torch.split(x, split_size_or_sections=chunk_size, dim=1)
+            
+            for i, head in enumerate(self.final_layers):
+                output = head(feature_chunks[i])
+                output = self.sigmoid(output)
+                outputs.append(output)
+                
+            return outputs
+
+    def train_model(models_left, models_right, decoder, train_loader, num_epochs=10, lr=5e-5, class_step=False, e_add = 0, e_total = 0, exp_stage=False, lrs=[], label_sizes=[], aug_levels=[]):
+
+        device = DEVICE#torch.device("cuda:0")
+        print(f"Using device: {device}", flush=True)
+        
+        #model = model.to(device)
+        criterion = nn.MSELoss()
+        
+        
+        # For tracking progress
+        epoch_losses = []
+        batch_losses = []
+
+        EPOCH_SIZE = 100
+
+        #model.train()
+        for model in models_left + models_right:
+            model.train()
+        models_left = [ model.to(DEVICE) for model in models_left ]
+        models_right = [ model.to(DEVICE) for model in models_right ]
+
+        optimizersL = [ optim.AdamW(list(models_left[e].parameters()), lr=lrs[e]) for e in range(len(models_left)) ]
+        optimizersR = [ optim.AdamW(list(models_right[e].parameters()), lr=lrs[e]) for e in range(len(models_right)) ]
+
+        def warmup_fn(epoch):
+            return min(1.0, (epoch+1) / (5*EPOCH_SIZE))  # Gradually increase LR for first 5 epochs
+
+        warmup_schedulersL = [ LambdaLR(e, lr_lambda=warmup_fn) for e in optimizersL ]
+        warmup_schedulersR = [ LambdaLR(e, lr_lambda=warmup_fn) for e in optimizersR ]
+
+        T_max = num_epochs-5  # Total epochs minus warm-up
+        eta_min = 1e-6  # Minimum LR after decay
+
+        cosine_schedulersL = [ CosineAnnealingLR(e, T_max=T_max * EPOCH_SIZE, eta_min=eta_min) for e in optimizersL ]
+        cosine_schedulersR = [ CosineAnnealingLR(e, T_max=T_max * EPOCH_SIZE, eta_min=eta_min) for e in optimizersR ]
+
+        def make_batch(batcher_fn, batch_size=32):
+            labels_left = []
+            labels_right = []
+            inputs_left = []
+            inputs_right = []
+            gaze_states = []
+            for e in range(batch_size):
+                input_left, input_right, label_left, label_right, gaze_state, state = batcher_fn()
+                inputs_left.append(input_left)
+                inputs_right.append(input_right)
+                labels_left.append(label_left)
+                labels_right.append(label_right)
+                gaze_states.append(gaze_state)
+            
+            return torch.stack(inputs_left, dim=0), torch.stack(inputs_right, dim=0), torch.stack(labels_left, dim=0), torch.stack(labels_right, dim=0), torch.stack(gaze_states, dim=0)
+
+        def train_one_model(num_epochs, steps_per_epoch, model_idx, batcher_fn):
+            dataloader = DataLoader(DatasetWrapper(batcher_fn, num_epochs, 32, steps_per_epoch), batch_size=32, shuffle=True, num_workers=8, worker_init_fn=worker_init, pin_memory=True)
+            
+            print("\nTraining %s:" % (MODEL_NAMES[model_idx]))
+            optim_left = optimizersL[model_idx]
+            optim_right = optimizersR[model_idx]
+            model_left = models_left[model_idx]
+            model_right = models_right[model_idx]
+            sched_left_w = warmup_schedulersL[model_idx]
+            sched_right_w = warmup_schedulersR[model_idx]
+            sched_left = cosine_schedulersL[model_idx]
+            sched_right = cosine_schedulersR[model_idx]
+
+            label_start_idx = 0
+            for e in range(model_idx):
+                label_start_idx = label_start_idx + label_sizes[e]
+            label_end_idx = label_start_idx + label_sizes[model_idx]
+
+            train_loader.reset_use_counts()
+
+            dataloader_iterator = iter(dataloader)
+
+            for epoch in range(num_epochs):
+                all_loss = 0
+                start_time = time.time()
+                for step in range(steps_per_epoch):
+                    inputs_left, inputs_right, labels_left, labels_right, gaze_states, sample_states = next(dataloader_iterator)
+                    
+                    optim_left.zero_grad()
+                    optim_right.zero_grad()
+
+                    predL = model_left(inputs_left.to(DEVICE))
+                    predR = model_right(inputs_right.to(DEVICE))
+
+                    loss = criterion(predL, labels_left[:, label_start_idx:label_end_idx].to(DEVICE))
+                    loss += criterion(predR, labels_right[:, label_start_idx:label_end_idx].to(DEVICE))
+
+                    loss.backward()
+
+                    optim_left.step()
+                    optim_right.step()
+                    print("\r[%s(%d/%d)][%d/%d][%u/%u] loss: %.4f, lr: %.5f" % (MODEL_NAMES[model_idx], model_idx+1, len(MODEL_NAMES), epoch, num_epochs, step, EPOCH_SIZE, float(loss), float(optim_left.param_groups[0]['lr'])), flush=True, end='')
+                    all_loss += float(loss)
+
+                    if epoch < 5:
+                        sched_left_w.step()
+                        sched_right_w.step()
+                    else:
+                        sched_left.step()
+                        sched_right.step()
+                total_time = time.time() - start_time
+                print(" - Epoch average: %.4f, time: %.1fs" % (all_loss / steps_per_epoch, total_time))
+
+        GAZE_EPOCHS = 32
+        BLINK_EPOCHS = 32
+        SQWI_EPOCHS = 32
+        BROW_EPOCHS = 32
+
+        train_one_model(GAZE_EPOCHS, EPOCH_SIZE, 0, batcher_gaze)
+        train_one_model(BLINK_EPOCHS, EPOCH_SIZE, 1, batcher_lid)
+        train_one_model(SQWI_EPOCHS, EPOCH_SIZE, 2, batcher_wide_squeeze)
+        train_one_model(BROW_EPOCHS, EPOCH_SIZE, 3, batcher_brow)
+
+        return models_left, models_right, epoch_losses, batch_losses
+
+    def normalize_similarity(similarity):
+        return (similarity + 1) / 2
+
+    def main():
+        # Set random seed for reproducibility
+        torch.manual_seed(42)
+        np.random.seed(42)
+        random.seed(42)
+        
+        model_L=[MicroChad(out_count=2),MicroChad(out_count=1),MicroChad(out_count=2),MicroChad(out_count=1)]
+        model_R=[MicroChad(out_count=2),MicroChad(out_count=1),MicroChad(out_count=2),MicroChad(out_count=1)]
+
+        trained_model_L = model_L
+        trained_model_R = model_R
+
+        EPOCHS = 42
+
+        dataset = CaptureDataset('G:\\Baballonia.Setup.v1.1.0.8\\user_cal.bin', all_frames=False)
+
+        train_dataset = dataset
+        train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=0)
+
+        trained_model_L, trained_model_R, epoch_losses, batch_losses = train_model(
+            trained_model_L,
+            trained_model_R,
+            None,
+            dataset, 
+            num_epochs=EPOCHS,
+            lr=0.001,
+            class_step=True, 
+            exp_stage=False,
+            e_add = 0,
+            e_total = EPOCHS,
+            lrs=[0.001, 1e-4, 1e-4, 1e-4],
+            label_sizes=[2, 1, 2, 1],
+            aug_levels=[0, 1, 2, 2]
+        )
+
+        for e in range(len(trained_model_L)):
+            torch.save(trained_model_R[e].state_dict(), "right_tuned_sqwi_multiv2_%d.pth"%e)
+            torch.save(trained_model_L[e].state_dict(), "left_tuned_sqwi_multiv2_%d.pth"%e)
+
+        print("\nTraining completed successfully!\n", flush=True)
+
+        device = torch.device("cpu")
+        multi = MultiInputMergedMicroChad(trained_model_L, trained_model_R)
+
+        device = torch.device("cpu")
+        multi = multi.to(device)
+        
+        dummy_input = torch.randn(1, 8, 128, 128, device=device)  # Updated to 8 channels
+        torch.onnx.export(
+            multi,
+            dummy_input,
+            sys.argv[2],
+            export_params=True,
+            opset_version=15,
+            do_constant_folding=True,
+            input_names=['input'],
+            output_names=['output'],
+            dynamic_axes={
+                'input': {0: 'batch_size'},
+                'output': {0: 'batch_size'}
+            }
+        )
+        print("Model exported to ONNX: " + sys.argv[2], flush=True)
+
+    main()

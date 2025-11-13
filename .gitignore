@@ -1,1 +1,9 @@
-.idea/
+.idea//venv
+/babble_data/build
+/babble_data/babble_data.egg-info
+/__pycache__
+*.pth
+*.pt
+*.bin
+*.onnx
+/build
