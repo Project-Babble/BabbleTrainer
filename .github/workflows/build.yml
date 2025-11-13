@@ -40,7 +40,7 @@ jobs:
       - name: Install OpenCV (Linux)
         if: ${{ matrix.result == 'Linux-x64' || matrix.result == 'Linux-arm' }}
         run: |
-          apt install libopencv-dev
+          sudo apt install libopencv-dev
           
       - name: Install OpenCV (Windows x64)
         if: ${{ matrix.result == 'Windows-x64' }}
