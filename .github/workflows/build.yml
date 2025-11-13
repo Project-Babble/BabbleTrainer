@@ -56,7 +56,7 @@ jobs:
         uses: johnwason/vcpkg-action@v7
         with:
           pkgs: opencv
-          triplet: arm64-windows-release
+          triplet: arm64-windows
           token: ${{ github.token }}
 
       - name: Set up Python
