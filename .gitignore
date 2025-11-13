@@ -1,4 +1,4 @@
-.idea//venv
+.idea/
 /babble_data/build
 /babble_data/babble_data.egg-info
 /__pycache__

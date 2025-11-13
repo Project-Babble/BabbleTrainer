@@ -24,8 +24,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - { result: Linux, runs-on: ubuntu-22.04 }
-          - { result: Windows, runs-on: windows-2022 }
+          - { result: Linux-x64, runs-on: ubuntu-22.04 }
+          - { result: Windows-x64, runs-on: windows-2022 }
+          - { result: Linux-arm, runs-on: ubuntu-22.04-arm }
+          - { result: Windows-arm, runs-on: windows-2022-arm }
     
     runs-on: ${{ matrix.runs-on }}
     
@@ -34,14 +36,27 @@ jobs:
         uses: actions/checkout@v5
         with:
           submodules: 'recursive'
+          
 
-      - name: Create Executable
-        uses: sayyid5416/pyinstaller@v1
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          spec: 'BabbleTrainer.spec'
-          python_ver: '3.12.8'
-          requirements: 'requirements.txt'
-          upload_exe_with_name: ${{ matrix.result }}
+          python-version: 3.12.11
+          
+      - name: Execute Pyinstaller
+        run: |
+          pip install pyinstaller
+          pip install numpy
+          python babble_data/setup.py install
+          pip install -r requirements.txt
+          pyinstaller BabbleTrainer.spec
+        working-directory: ./
+        
+      - name: Create Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ matrix.result }}
+          path: dist/
           
   release:
     needs: build
