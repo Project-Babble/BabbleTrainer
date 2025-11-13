@@ -53,7 +53,7 @@ jobs:
         working-directory: ./
         
       - name: Create Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v5
         with:
           name: ${{ matrix.result }}
           path: dist/
