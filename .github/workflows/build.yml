@@ -27,7 +27,7 @@ jobs:
           - { result: Linux-x64, runs-on: ubuntu-22.04 }
           - { result: Windows-x64, runs-on: windows-2022 }
           - { result: Linux-arm, runs-on: ubuntu-22.04-arm }
-          - { result: Windows-arm, runs-on: windows-11-arm }
+          #- { result: Windows-arm, runs-on: windows-11-arm }
     
     runs-on: ${{ matrix.runs-on }}
     
@@ -105,12 +105,19 @@ jobs:
         with:
           name: Linux
           path: ./artifacts/linux
+          
+      - name: Download Linux ARM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Linux-ARM
+          path: ./artifacts/linux-arm
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/windows/BabbleTrainer.exe
-            artifacts/linux/BabbleTrainer
+            artifacts/windows/BabbleTrainer-x64.exe
+            artifacts/linux/BabbleTrainer-x64
+            artifacts/linux-arm/BabbleTrainer-arm
           tag_name: ${{ github.event.inputs.version-number }}
           prerelease: ${{ github.event.inputs.publish-pre-release }}
