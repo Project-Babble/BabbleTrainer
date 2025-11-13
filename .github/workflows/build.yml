@@ -47,7 +47,9 @@ jobs:
         run: |
           pip install pyinstaller
           pip install numpy
-          python babble_data/setup.py install
+          cd babble_data
+          python setup.py install
+          cd ..
           pip install -r requirements.txt
           pyinstaller BabbleTrainer.spec
         working-directory: ./
