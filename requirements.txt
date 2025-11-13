@@ -13,5 +13,3 @@ pillow
 onnx
 onnxscript
 tqdm
-
--e babble_data
