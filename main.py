@@ -10,6 +10,8 @@ import torch.nn as nn
 import multiprocessing
 multiprocessing.freeze_support() 
 import torch
+from torch._utils import _rebuild_device_tensor_from_numpy
+torch.serialization.add_safe_globals([_rebuild_device_tensor_from_numpy])
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
@@ -207,7 +209,7 @@ def merge_models(names, sizes):
         size = sizes[i]
 
         sdL = torch.load("./model_" + name + "_left.pth", weights_only=True, map_location=device)
-        sdR = torch.load("./model_" + name + "_left.pth", weights_only=True, map_location=device)
+        sdR = torch.load("./model_" + name + "_right.pth", weights_only=True, map_location=device)
 
         left = MicroChad(out_count=size).to(device)
         right = MicroChad(out_count=size).to(device)
@@ -451,4 +453,5 @@ TOTAL_STEPS_TRAINED_END = 1000 + 1000 + 1600 + 1600 + 1600 + 1600
 merge_models(["gaze", "blink", "brow"], [2, 2, 1])
 
 print("\nTraining completed successfully!\n", flush=True)
+
 
