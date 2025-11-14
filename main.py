@@ -10,8 +10,10 @@ import torch.nn as nn
 import multiprocessing
 multiprocessing.freeze_support() 
 import torch
+import torch.serialization
 from torch._utils import _rebuild_device_tensor_from_numpy
 torch.serialization.add_safe_globals([_rebuild_device_tensor_from_numpy])
+torch.serialization.add_safe_globals([np.core.multiarray._reconstruct])
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
@@ -453,5 +455,6 @@ TOTAL_STEPS_TRAINED_END = 1000 + 1000 + 1600 + 1600 + 1600 + 1600
 merge_models(["gaze", "blink", "brow"], [2, 2, 1])
 
 print("\nTraining completed successfully!\n", flush=True)
+
 
 
