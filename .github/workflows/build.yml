@@ -110,20 +110,25 @@ jobs:
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
-          name: Windows
+          name: Windows-x64
           path: ./artifacts/windows
 
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: Linux
+          name: Linux-x64
           path: ./artifacts/linux
           
       - name: Download Linux ARM artifact
         uses: actions/download-artifact@v4
         with:
-          name: Linux-ARM
+          name: Linux-arm
           path: ./artifacts/linux-arm
+          
+      - name: Rename Artifacts
+        run: |
+          artifacts/linux/BabbleTrainer artifacts/linux/BabbleTrainer-x64
+          mv artifacts/linux-arm/BabbleTrainer artifacts/linux-arm/BabbleTrainer-arm
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
