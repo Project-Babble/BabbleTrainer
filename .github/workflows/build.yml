@@ -137,6 +137,6 @@ jobs:
           files: |
             artifacts/windows/BabbleTrainer-x64.exe
             artifacts/linux/BabbleTrainer-x64
-            artifacts/linux-arm/BabbleTrainer-arm
+            artifacts/linux-arm/BabbleTrainer-arm64
           tag_name: ${{ github.event.inputs.version-number }}
           prerelease: ${{ github.event.inputs.publish-pre-release }}
