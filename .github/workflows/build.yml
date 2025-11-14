@@ -127,8 +127,8 @@ jobs:
           
       - name: Rename Artifacts
         run: |
-          artifacts/linux/BabbleTrainer artifacts/linux/BabbleTrainer-x64
-          mv artifacts/linux-arm/BabbleTrainer artifacts/linux-arm/BabbleTrainer-arm
+          sudo mv artifacts/linux/BabbleTrainer artifacts/linux/BabbleTrainer-x64
+          sudo mv artifacts/linux-arm/BabbleTrainer artifacts/linux-arm/BabbleTrainer-arm
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
