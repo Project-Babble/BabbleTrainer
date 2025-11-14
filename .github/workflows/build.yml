@@ -127,6 +127,7 @@ jobs:
           
       - name: Rename Artifacts
         run: |
+          sudo mv artifacts/windows/BabbleTrainer.exe artifacts/windows/BabbleTrainer-x64.exe
           sudo mv artifacts/linux/BabbleTrainer artifacts/linux/BabbleTrainer-x64
           sudo mv artifacts/linux-arm/BabbleTrainer artifacts/linux-arm/BabbleTrainer-arm
 
