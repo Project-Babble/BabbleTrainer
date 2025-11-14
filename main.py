@@ -201,13 +201,13 @@ class AdapterWrapper(nn.Module):
 def merge_models(names, sizes):
     modelsL = []
     modelsR = []
+    device = 'cpu'
     for i in range(len(names)):
         name = names[i]
         size = sizes[i]
 
-        sdL = torch.load("./model_" + name + "_left.pth")
-        sdR = torch.load("./model_" + name + "_left.pth")
-
+        sdL = torch.load("./model_" + name + "_left.pth", weights_only=True, map_location=device)
+        sdR = torch.load("./model_" + name + "_left.pth", weights_only=True, map_location=device)
 
         left = MicroChad(out_count=size).to(device)
         right = MicroChad(out_count=size).to(device)
@@ -451,3 +451,4 @@ TOTAL_STEPS_TRAINED_END = 1000 + 1000 + 1600 + 1600 + 1600 + 1600
 merge_models(["gaze", "blink", "brow"], [2, 2, 1])
 
 print("\nTraining completed successfully!\n", flush=True)
+
