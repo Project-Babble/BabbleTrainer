@@ -195,7 +195,7 @@ class AdapterWrapper(nn.Module):
         R_squwi = torch.zeros((1, 2), dtype=torch.float32)
         R_squwi[:, [0,]] = preds[4][:, [1,]]
 
-        return [preds[0], preds[1][:, [0,]], L_squwi, preds[2], preds[3], preds[4][:, [0,]], R_squwi, preds[5]]
+        return [preds[0], preds[1][:, [0,]], L_squwi, preds[2], preds[3][:, [0,]], R_squwi, preds[4]]
 
 
 def merge_models(names, sizes):
@@ -451,6 +451,7 @@ TOTAL_STEPS_TRAINED_END = 1000 + 1000 + 1600 + 1600 + 1600 + 1600
 merge_models(["gaze", "blink", "brow"], [2, 2, 1])
 
 print("\nTraining completed successfully!\n", flush=True)
+
 
 
 
