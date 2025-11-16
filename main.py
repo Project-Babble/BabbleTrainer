@@ -189,13 +189,22 @@ class AdapterWrapper(nn.Module):
     def forward(self, x):
         preds = self.mmchad(x)
 
-        L_squwi = torch.zeros((1, 2), dtype=torch.float32)
-        L_squwi[:, [0,]] = preds[1][:, [1,]]
+        left_gaze_pitch = preds[0][0]
+        left_gaze_yaw = preds[0][1]
+        left_lid = preds[1][0]
+        left_widen = preds[1][1]
+        left_squeeze = 0
+        left_brow = preds[2][0]
 
-        R_squwi = torch.zeros((1, 2), dtype=torch.float32)
-        R_squwi[:, [0,]] = preds[4][:, [1,]]
+        right_gaze_pitch = preds[3][0]
+        right_gaze_yaw = preds[3][1]
+        right_lid = preds[4][0]
+        right_widen = preds[4][1]
+        right_squeeze = 0
+        right_brow = preds[5][0]
 
-        return [preds[0], preds[1][:, [0,]], L_squwi, preds[2], preds[3][:, [0,]], R_squwi, preds[4]]
+        return [left_gaze_pitch, left_gaze_yaw, left_lid, left_widen, left_squeeze, left_brow,
+                right_gaze_pitch, right_gaze_yaw, right_lid, right_widen, right_squeeze, right_brow]
 
 
 def merge_models(names, sizes):
