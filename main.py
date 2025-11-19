@@ -1,469 +1,255 @@
-print("Importing...")
-import babble_data
-import numpy as np
+from data import CaptureDataset, DatasetWrapper, worker_init_with_file
+import functools
 import time
-from PIL import Image
-from tqdm import tqdm
-import cv2
-import torch.nn as nn
-
-import multiprocessing
-multiprocessing.freeze_support() 
-import torch
-import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
-from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
-
-from trainer_distsampler import read_capture_file
-
-from models import MicroChad, MultiInputMergedMicroChad
-import torch.nn.functional as F
-import torch
 import random
-import sys
-import random
-random.seed(42)
-torch.manual_seed(42)
-np.random.seed(42)
 
-try:
-    import torch_directml
-    device = torch_directml.device()
-except:
-    device = "cpu"
+import torch_directml
+import babble_data
 
-print("Preparing dataset...")
-raw_jpeg_data_left = []
-raw_jpeg_data_right = []
-cap = read_capture_file(sys.argv[1])
+device = torch_directml.device()
 
-random.shuffle(cap)
-
-FLAG_GOOD_DATA = 1 << 30
 FLAG_GAZE_DATA = 1 << 0
+MODEL_NAMES = ["gaze", "blink", "widesqueeze", "brow"]
 
-def select_gaze(side):
-    i = 0
-    raw_jpeg_data = []
-    all_labels = np.empty((1, len(cap), 17), dtype=np.float32)
-    for frame in cap:
-        _, _, routine_distance, routine_convergence, fov_adjust_distance, left_eye_pitch, left_eye_yaw, right_eye_pitch, right_eye_yaw, routine_left_lid, routine_right_lid, routine_brow_raise, routine_brow_angry, routine_widen, routine_squint, routine_dilate, routine_state = frame[0]
-        if routine_state & FLAG_GOOD_DATA and routine_state & FLAG_GAZE_DATA:
-            raw_jpeg_data.append([frame[1],frame[4][2][1],frame[4][1][1],frame[4][0][1]] if side == 'left' else [frame[2],frame[4][2][2],frame[4][1][2],frame[4][0][2]])
-            all_labels[0][i] = frame[0]
-            i = i + 1
-    return babble_data.Loader(
-        jpeg_datasets=[raw_jpeg_data,],
-        dataset_probs=[1.0]
-    ), all_labels, len(raw_jpeg_data)
+# batcher functions used by workers
+def batcher_gaze(train_loader):
+    return train_loader.get_next_gaze()
 
-def select_brow(side):
-    i = 0
-    e = 0
-    raw_jpeg_data_squint = []
-    raw_jpeg_data_other = []
-    all_labels = np.empty((2, len(cap), 17), dtype=np.float32)
-    for frame in cap:
-        _, _, routine_distance, routine_convergence, fov_adjust_distance, left_eye_pitch, left_eye_yaw, right_eye_pitch, right_eye_yaw, routine_left_lid, routine_right_lid, routine_brow_raise, routine_brow_angry, routine_widen, routine_squint, routine_dilate, routine_state = frame[0]
-        
-        labels = list(frame[0])
-        
-        if routine_state & FLAG_GOOD_DATA and routine_brow_angry > 0.5:
-            raw_jpeg_data_squint.append([frame[1],frame[4][2][1],frame[4][1][1],frame[4][0][1]] if side == 'left' else [frame[2],frame[4][2][2],frame[4][1][2],frame[4][0][2]])
-            all_labels[0][i] = labels
-            i = i + 1
-        elif routine_state & FLAG_GOOD_DATA:
-            raw_jpeg_data_other.append([frame[1],frame[4][2][1],frame[4][1][1],frame[4][0][1]] if side == 'left' else [frame[2],frame[4][2][2],frame[4][1][2],frame[4][0][2]])
-            all_labels[1][e] = labels
-            e = e + 1
-
-    return babble_data.Loader(
-        jpeg_datasets=[raw_jpeg_data_squint, raw_jpeg_data_other],
-        dataset_probs=[0.5, 0.5]
-    ), all_labels, len(raw_jpeg_data_squint)
-
-def select_squint_wide_blink(side):
-    i = 0
-    e = 0
-    raw_jpeg_data_squint = []
-    raw_jpeg_data_other = []
-    all_labels = np.empty((2, len(cap)*2, 17), dtype=np.float32)
-    for frame in cap:
-        _, _, routine_distance, routine_convergence, fov_adjust_distance, left_eye_pitch, left_eye_yaw, right_eye_pitch, right_eye_yaw, routine_left_lid, routine_right_lid, routine_brow_raise, routine_brow_angry, routine_widen, routine_squint, routine_dilate, routine_state = frame[0]
-
-        labels = list(frame[0])
-
-        o_lid = routine_left_lid
-
-        if routine_squint > 0.5:
-            labels[9] = 0.7
-            labels[10] = 0.7
-            routine_left_lid = routine_right_lid = 0.7
-        elif routine_widen > 0.5:
-            labels[9] = 0.0
-            labels[10] = 0.0
-            routine_left_lid = routine_right_lid = 0.0
-        elif o_lid > 0.5:
-            labels[9] = 0.3
-            labels[10] = 0.3
-            routine_left_lid = routine_right_lid = 0.3
+def batcher_lid(train_loader): #todo better weighting just threw this together
+    f = random.random()
+    if f > 0.2:
+        if f > 0.9:
+            return train_loader.get_next_angry()
         else:
-            labels[9] = 1.0
-            labels[10] = 1.0
-            routine_left_lid = routine_right_lid = 1.0
-        
-        if routine_state & FLAG_GOOD_DATA and (routine_squint > 0.5 or routine_widen > 0.5 or o_lid < 0.5):
-            raw_jpeg_data_squint.append([frame[1],frame[4][2][1],frame[4][1][1],frame[4][0][1]] if side == 'left' else [frame[2],frame[4][2][2],frame[4][1][2],frame[4][0][2]])
+            return train_loader.get_next_gaze()
+    else:
+        f = random.random()
+        if f > 0.5:
+            return train_loader.get_next_closed()
+        elif f > 0.25:
+            return train_loader.get_next_wide()
+        else:
+            return train_loader.get_next_squint()
 
-            labels[9] = 1.0
-            labels[10] = 1.0
-            if routine_squint > 0.5:
-                labels[9] = 0.7
-                labels[10] = 0.7
-            elif routine_widen > 0.5:
-                labels[9] = 0.0
-                labels[10] = 0.0
-            all_labels[0][i] = labels
-            #all_labels[0][i+1] = labels
-            i = i + 1
-        elif routine_state & FLAG_GOOD_DATA:
-            raw_jpeg_data_other.append([frame[1],frame[4][2][1],frame[4][1][1],frame[4][0][1]] if side == 'left' else [frame[2],frame[4][2][2],frame[4][1][2],frame[4][0][2]])#raw_jpeg_data_other.append([frame[1],frame[4][2][1],frame[4][1][1],frame[4][0][1]])
-
-            labels[9] = 0
-            labels[10] = 0
-            all_labels[1][e] = labels
-            #all_labels[1][e+1] = labels
-            e = e + 1
-
-    # invert gaze labels
-    #all_labels[:, :, [9, 10]] = 1-all_labels[:, :, [9, 10]]
-
-    return babble_data.Loader(
-        jpeg_datasets=[raw_jpeg_data_squint, raw_jpeg_data_other],
-        dataset_probs=[0.33333, 0.66666]
-    ), all_labels, len(raw_jpeg_data_squint)
-
-
-def select_squint_wide_brow(side):
-    i = 0
-    e = 0
-    raw_jpeg_data_squint = []
-    raw_jpeg_data_other = []
-    all_labels = np.empty((2, len(cap), 17), dtype=np.float32)
-    for frame in cap:
-        _, _, routine_distance, routine_convergence, fov_adjust_distance, left_eye_pitch, left_eye_yaw, right_eye_pitch, right_eye_yaw, routine_left_lid, routine_right_lid, routine_brow_raise, routine_brow_angry, routine_widen, routine_squint, routine_dilate, routine_state = frame[0]
-        
-        labels = list(frame[0])
-        
-        if routine_state & FLAG_GOOD_DATA and (routine_squint > 0.5 or routine_widen > 0.5 or routine_brow_angry > 0.5 or (routine_left_lid < 0.5 and side == 'left') or (routine_right_lid < 0.5 and side == 'right')):
-            raw_jpeg_data_squint.append([frame[1],frame[4][2][1],frame[4][1][1],frame[4][0][1]] if side == 'left' else [frame[2],frame[4][2][2],frame[4][1][2],frame[4][0][2]])
-            all_labels[0][i] = labels
-            i = i + 1
-        elif routine_state & FLAG_GOOD_DATA:
-            raw_jpeg_data_other.append([frame[1],frame[4][2][1],frame[4][1][1],frame[4][0][1]] if side == 'left' else [frame[2],frame[4][2][2],frame[4][1][2],frame[4][0][2]])
-            all_labels[1][e] = labels
-            e = e + 1
-
-    # invert gaze labels
-    #all_labels[:, :, [9, 10]] = 1-all_labels[:, :, [9, 10]]
-
-    return babble_data.Loader(
-        jpeg_datasets=[raw_jpeg_data_squint, raw_jpeg_data_other],
-        dataset_probs=[0.5, 0.5]
-    ), all_labels, len(raw_jpeg_data_squint)
-
-print("Starting up babble data loader...")
-import numpy as np
-import torch
-import torch.nn.functional as F
-from torch.optim.lr_scheduler import LambdaLR
-from tqdm import tqdm
-import random
-import cv2
-
-class AdapterWrapper(nn.Module):
-    def __init__(self, mmchad):
-        super(AdapterWrapper, self).__init__()
-        self.mmchad = mmchad
-
-    def forward(self, x):
-        preds = self.mmchad(x)
-
-        left_gaze_pitch = preds[0][0]
-        left_gaze_yaw = preds[0][1]
-        left_lid = preds[1][0]
-        left_widen = preds[1][1]
-        left_squeeze = 0
-        left_brow = preds[2][0]
-
-        right_gaze_pitch = preds[3][0]
-        right_gaze_yaw = preds[3][1]
-        right_lid = preds[4][0]
-        right_widen = preds[4][1]
-        right_squeeze = 0
-        right_brow = preds[5][0]
-
-        return [left_gaze_pitch, left_gaze_yaw, left_lid, left_widen, left_squeeze, left_brow,
-                right_gaze_pitch, right_gaze_yaw, right_lid, right_widen, right_squeeze, right_brow]
-
-
-def merge_models(names, sizes):
-    modelsL = []
-    modelsR = []
-    device = 'cpu'
-    for i in range(len(names)):
-        name = names[i]
-        size = sizes[i]
-
-        sdL = torch.load("./model_" + name + "_left.pth", weights_only=False, map_location=device)
-        sdR = torch.load("./model_" + name + "_right.pth", weights_only=False, map_location=device)
-
-        left = MicroChad(out_count=size).to(device)
-        right = MicroChad(out_count=size).to(device)
-
-        left.load_state_dict(sdL)
-        right.load_state_dict(sdR)
-
-        modelsL.append(left)
-        modelsR.append(right)
-
-    torch.onnx.export(
-        AdapterWrapper(MultiInputMergedMicroChad(modelsL, modelsR).cpu()),
-        torch.randn(1, 8, 128, 128),
-        sys.argv[2],
-        export_params=True,
-        opset_version=15,
-        do_constant_folding=True,
-        input_names=['input'],
-        output_names=['output'],
-        dynamic_axes={
-            'input': {0: 'batch_size'},
-            'output': {0: 'batch_size'}
-        }
-    )
-
-TOTAL_STEPS_TRAINED = 0
-TOTAL_STEPS_TRAINED_END = 0
-LAST_SIM_EPOCH = 0
-
-def train_model(kind, label_idx, class_count, steps, enable_gaze_correction=False, side='left', lr=0.001, batch_size=16, enable_noise_aug=False, do_warmup=True, do_cooldown=False):
-    global TOTAL_STEPS_TRAINED
-    global LAST_SIM_EPOCH
-
-    if kind == 'brow':
-        loader, all_labels, dataset_count = select_brow(side)
-    if kind == 'sqwibl' or kind == 'blink':
-        loader, all_labels, dataset_count = select_squint_wide_blink(side)
-    if kind == 'sqwibrbl' or kind == "brbl":
-        loader, all_labels, dataset_count = select_squint_wide_brow(side)
-    elif kind == 'gaze':
-        loader, all_labels, dataset_count = select_gaze(side)
-
-    BATCH_SIZE = batch_size
-    NUM_WORKERS = 16
-    QUEUE_SIZE = 2048
-    loader.start(NUM_WORKERS, QUEUE_SIZE)
-
-    print("Setting up training...")
-
-    batch_np = np.empty((BATCH_SIZE, 4, 128, 128), dtype=np.float32)
-
-    # each value is (dataset, index)
-    batch_idx = np.empty((BATCH_SIZE, 2), dtype=np.int64)
-
-    print("Microchad init")
-
-    model = MicroChad(out_count=class_count).to(device)
-
-    print("optim init")
-    o = torch.optim.AdamW(model.parameters(), lr=lr)
-
-    def warmup_fn(step):
-        x = step / (steps / 10)
-        return min(1.0, (np.arctanh(1 - (x * 1.4 * np.pi) + 1) + 1) / 2)
-        #return min(1.0, step / (steps / 10))  # Gradually increase LR for first 5 epochs
-
-    def warmed_up_fn(step):
-        return 1.0
+def batcher_wide_squeeze(train_loader):
+    f = random.random()
+    if f > 0.5:
+        if f > 0.9:
+            return train_loader.get_next_closed()
+        elif f > 0.8:
+            return train_loader.get_next_angry()
+        else:
+            return train_loader.get_next_gaze()
+    elif f > 0.25:
+        return train_loader.get_next_wide()
+    else:
+        return train_loader.get_next_squint()
     
-    def cooldown_fn(step):
-        x = step / steps
-        return min(1.0, -np.arctanh(x / 1.4) + 1)
+def batcher_brow(train_loader):
+    f = random.random()
+    if f > 0.7:
+        if f > 0.975:
+            return train_loader.get_next_closed()
+        elif f > 0.95:
+            return train_loader.get_next_squint()
+        elif f > 0.925:
+            return train_loader.get_next_wide()
+        else:
+            return train_loader.get_next_gaze()
+        
+    else:
+        return train_loader.get_next_angry()
 
-    warmup_scheduler = LambdaLR(o, lr_lambda=cooldown_fn if do_cooldown else warmup_fn if do_warmup else warmed_up_fn)
 
-    print("\nTraining "+ side+" "+ kind+"...")
-    #progress = tqdm(range(steps))
-    all_L = 0
-    total_images = 0
-    tsteps = 0
+global_epoch = 0
+global_epoch_count = 0
+
+if __name__ == "__main__":
+    import torch
+    import torch.optim as optim
+    from torch.utils.data import Dataset, DataLoader
+    from torch.optim.lr_scheduler import LambdaLR, CosineAnnealingLR
+    from models import MicroChad, MultiInputMergedMicroChad
+    import numpy as np
+    import torch.nn as nn
+    import random
+    import sys
     
-    counts = np.zeros((2, ), dtype=np.int64)
-    for i in range(steps):#for i in progress:
+    DEVICE = device
 
-        # simulate old style printing
-        #sim_epoch = int((TOTAL_STEPS_TRAINED / TOTAL_STEPS_TRAINED_END) * 100)
-        #if sim_epoch != LAST_SIM_EPOCH:
-        #    print("\n=== Epoch %d/%d ===\n" % (sim_epoch, 100), flush=True)
-        #    LAST_SIM_EPOCH = sim_epoch
+    #['main.py', 'user_cal.bin', 'tuned_temporal_eye_tracking.onnx']
+    print("Sys argv:")
+    print(sys.argv)
 
-        #TOTAL_STEPS_TRAINED += i
+    BIN_FILE = sys.argv[1]
 
+    def train_model(models_left, models_right, train_loader, lrs=[], label_sizes=[]):
+        global global_epoch_count
+        device = DEVICE
+        print(f"Using device: {device}", flush=True)
 
-        o.zero_grad()
-        loader.fill_batch(batch_np, batch_idx)
+        criterion = nn.MSELoss()
 
-        if True:
-            set_mask = batch_idx[:, 0]
-            label_mask = batch_idx[:, 1]
+        EPOCH_SIZE = 100
 
-            labels = all_labels[set_mask, label_mask][:, label_idx]
+        for model in models_left + models_right:
+            model.train()
+        models_left = [ model.to(DEVICE) for model in models_left ]
+        models_right = [ model.to(DEVICE) for model in models_right ]
 
-            if enable_gaze_correction:
-                labels =  (labels + 45) / 90
+        optimizersL = [ optim.AdamW(list(models_left[e].parameters()), lr=lrs[e]) for e in range(len(models_left)) ]
+        optimizersR = [ optim.AdamW(list(models_right[e].parameters()), lr=lrs[e]) for e in range(len(models_right)) ]
 
-            #print(labels[0])
-
-            labels = torch.tensor(labels, device=device)
-            inputs = torch.tensor(batch_np, device=device)
-
-            if enable_noise_aug:
-                if random.random() > 0.8:
-                    labels = torch.rand_like(labels)
-                    inputs = torch.rand_like(inputs)
-                    is_rand_batch = True
-                else:
-                    labels += torch.randn_like(labels) * 0.1
-                    inputs += torch.randn_like(inputs) * 0.1
-                    
-
-                    is_rand_batch = False
-                    
-            else:
-                is_rand_batch = False
-            tsteps+=1
-            labels = torch.clip(labels, 0, 1)
-            inputs = torch.clip(inputs, 0, 1)
-            loss = F.mse_loss(model(inputs), labels)
-
-            if not is_rand_batch:
-                all_L += loss.detach()
-            total_images += BATCH_SIZE
-
-            loss.backward()
-            o.step()
-            warmup_scheduler.step()
-
-            print("\rBatch %u/%u, Loss: %.6f" % (i, steps, float(loss)), flush=True)
-
-        if i % 100 == 0 and False:  # Update the preview window every 100 steps
-            GRID_SIZE = 4
-            PREVIEW_COUNT = GRID_SIZE * GRID_SIZE
+        def train_one_model(num_epochs, steps_per_epoch, model_idx, batcher_fn):
+            global global_epoch
+            worker_init = functools.partial(worker_init_with_file, file=BIN_FILE)
             
-            # Select the first PREVIEW_COUNT images and labels
-            # Use inputs.cpu().numpy() to get the images, as batch_np might not be the final input if is_rand_batch was True
-            preview_images_np = inputs[:PREVIEW_COUNT].cpu().numpy() # Shape (16, 4, 128, 128)
-            preview_labels = labels[:PREVIEW_COUNT].cpu().numpy()
             
-            rows = []
-            
-            for r in range(GRID_SIZE):
-                row_images = []
-                for c in range(GRID_SIZE):
-                    idx = r * GRID_SIZE + c
-                    
-                    # Get image and label
-                    img = preview_images_np[idx] # (4, 128, 128)
-                    label_val = preview_labels[idx]
-                    
-                    # Convert from C, H, W to H, W, C, select first 3 channels, scale to 0-255, and convert to uint8
-                    # Assumes input images in inputs are in the 0.0 to 1.0 range (like the labels clip)
-                    display_img = img[:3] # (3, 128, 128)
-                    display_img = np.transpose(display_img, (1, 2, 0)) # (128, 128, 3)
-                    
-                    # Scale float (0.0 to 1.0) to uint8 (0 to 255)
-                    display_img = (np.clip(display_img * 255, 0, 255)).astype(np.uint8) 
-                    
-                    # Convert RGB (assumed) to BGR for cv2 display
-                    display_img = cv2.cvtColor(display_img, cv2.COLOR_RGB2BGR)
 
-                    # Draw label text. Format label as a string with 4 decimal places.
-                    label_text = f"{label_val.item():.4f}" # .item() for scalar numpy/torch tensor
-                    
-                    # Draw text on the image
-                    # Position (5, 20) is near top-left. Color is bright green (0, 255, 0) BGR.
-                    cv2.putText(
-                        display_img, 
-                        label_text, 
-                        (5, 20), 
-                        cv2.FONT_HERSHEY_SIMPLEX, 
-                        0.5, 
-                        (0, 255, 0), 
-                        2, 
-                        cv2.LINE_AA
-                    )
-                    
-                    row_images.append(display_img)
-                    
-                # Concatenate images in the row horizontally
-                rows.append(cv2.hconcat(row_images))
+            #babble_data.init([raw_jpeg_data_left,raw_jpeg_data_right], [0.5,0.5])
+
+            if True:
+                dataloader = DataLoader(DatasetWrapper(batcher_fn, num_epochs, 16, steps_per_epoch), batch_size=16, shuffle=True, num_workers=8, worker_init_fn=worker_init)
                 
-            # Concatenate rows vertically to form the final grid
-            grid_image = cv2.vconcat(rows)
-            
-            # Display the grid
-            cv2.imshow("Training Input & Target Label Preview (4x4 Grid)", grid_image)
-            # cv2.waitKey(1) allows the window to update and keeps the program responsive
-            cv2.waitKey(1) 
-        # ----------------------------------------------------------------------
+                print("\nTraining %s:" % (MODEL_NAMES[model_idx]))
+                optim_left = optimizersL[model_idx]
+                optim_right = optimizersR[model_idx]
+                model_left = models_left[model_idx]
+                model_right = models_right[model_idx]
+
+                T_max = num_epochs-5  # Total epochs minus warm-up
+                eta_min = lrs[model_idx] / 5  # Minimum LR after decay
+                
+                sched_left = CosineAnnealingLR(optim_left, T_max=T_max * steps_per_epoch, eta_min=eta_min)
+                sched_right = CosineAnnealingLR(optim_right, T_max=T_max * steps_per_epoch, eta_min=eta_min)
+
+                def warmup_fn(epoch):
+                    return min(1.0, (epoch+1) / (5*EPOCH_SIZE))  # Gradually increase LR for first 5 epochs
+                
+                sched_left_w = LambdaLR(optim_left, lr_lambda=warmup_fn)
+                sched_right_w = LambdaLR(optim_right, lr_lambda=warmup_fn)
+
+                label_start_idx = 0
+                for e in range(model_idx):
+                    label_start_idx = label_start_idx + label_sizes[e]
+                label_end_idx = label_start_idx + label_sizes[model_idx]
+
+                train_loader.reset_use_counts()
+
+                dataloader_iterator = iter(dataloader)
+
+                for epoch in range(num_epochs):
+                    all_loss = 0
+                    start_time = time.time()
+                    global_epoch = global_epoch + 1
+                    print("\n=== Epoch %d/%d ===\n" % (global_epoch, global_epoch_count), flush=True)
+                    for step in range(steps_per_epoch):
+                        inputs_left, inputs_right, labels_left, labels_right, gaze_states, sample_states = next(dataloader_iterator)
+                        
+                        optim_left.zero_grad()
+                        optim_right.zero_grad()
+
+                        predL = model_left(inputs_left.to(DEVICE))
+                        predR = model_right(inputs_right.to(DEVICE))
+
+                        loss = criterion(predL, labels_left[:, label_start_idx:label_end_idx].to(DEVICE))
+                        loss += criterion(predR, labels_right[:, label_start_idx:label_end_idx].to(DEVICE))
+
+                        loss.backward()
+
+                        optim_left.step()
+                        optim_right.step()
+                        loss = loss.detach()
+                        print("\rBatch %u/%u, Loss: %.6f" % (step, EPOCH_SIZE, float(loss)), flush=True)#print()
+                        #print("[%s(%d/%d)][%d/%d][%u/%u] loss: %.4f, lr: %.5f" % (MODEL_NAMES[model_idx], model_idx+1, len(MODEL_NAMES), epoch, num_epochs, step, EPOCH_SIZE, float(loss), float(optim_left.param_groups[0]['lr'])), flush=True)
+                        all_loss += float(loss)
+
+                        if epoch < 5:
+                            sched_left_w.step()
+                            sched_right_w.step()
+                        #else:
+                        #    sched_left.step()
+                        #    sched_right.step()
+                    #total_time = time.time() - start_time
+                    #print(" - Epoch average: %.4f, time: %.1fs" % (all_loss / steps_per_epoch, total_time))
+                    print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (epoch + 1, num_epochs + 1, time.time() - start_time, all_loss / steps_per_epoch), flush=True)
+
+
+        GAZE_EPOCHS = 48
+        BLINK_EPOCHS = 32
+        SQWI_EPOCHS = 32
+        BROW_EPOCHS = 32
+
+        global_epoch_count = GAZE_EPOCHS + BLINK_EPOCHS + SQWI_EPOCHS + BROW_EPOCHS
+
+        train_one_model(GAZE_EPOCHS, EPOCH_SIZE, 0, batcher_gaze)
+        train_one_model(BLINK_EPOCHS, EPOCH_SIZE, 1, batcher_lid)
+        train_one_model(SQWI_EPOCHS, EPOCH_SIZE, 2, batcher_wide_squeeze)
+        train_one_model(BROW_EPOCHS, EPOCH_SIZE, 3, batcher_brow)
+
+        return models_left, models_right
+
+    def normalize_similarity(similarity):
+        return (similarity + 1) / 2
+
+    def main():
+        # Set random seed for reproducibility
+        torch.manual_seed(42)
+        np.random.seed(42)
+        random.seed(42)
         
-        if tsteps % 50 == 49:
-            #progress.set_description("loss:%.4f image:%d epoch:%d lr:%.5f" % (all_L / 50, total_images, total_images / dataset_count, warmup_scheduler.get_last_lr()[0]))
-            all_L = 0
+        model_L=[MicroChad(out_count=2), MicroChad(out_count=1), MicroChad(out_count=2), MicroChad(out_count=1)]
+        model_R=[MicroChad(out_count=2), MicroChad(out_count=1), MicroChad(out_count=2), MicroChad(out_count=1)]
 
-    loader.stop()
-    torch.save(model.state_dict(), "./model_" + kind + "_" + side+".pth")
-    
-    del loader
-    
-    # NEW: Close the OpenCV window when training is finished
-    cv2.destroyAllWindows()
+        trained_model_L = model_L
+        trained_model_R = model_R
 
-print("\n=== Epoch %d/%d ===\n" % (1, 6), flush=True)
-start = time.time()
-train_model("gaze", [7, 8], 2, 1000, enable_gaze_correction=True, enable_noise_aug=False, batch_size=128, do_warmup=False, side='right', do_cooldown=True)
-print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (1,6, time.time() - start, 0), flush=True)
-start = time.time()
-print("\n=== Epoch %d/%d ===\n" % (2, 6), flush=True)
-train_model("gaze", [5, 6], 2, 1000, enable_gaze_correction=True, enable_noise_aug=False, batch_size=128, do_warmup=False, side='left', do_cooldown=True)
-print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (2,6, time.time() - start, 0), flush=True)
-start = time.time()
-print("\n=== Epoch %d/%d ===\n" % (3, 6), flush=True)
-train_model("blink", [10,13], 2, 1600, enable_gaze_correction=False, enable_noise_aug=True, batch_size=16, side='right', lr=5e-5)
-print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (3,6, time.time() - start, 0), flush=True)
-start = time.time()
-print("\n=== Epoch %d/%d ===\n" % (4, 6), flush=True)
-train_model("blink", [9,13], 2, 1600, enable_gaze_correction=False, enable_noise_aug=True, batch_size=16, side='left', lr=5e-5)
-print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (4,6, time.time() - start, 0), flush=True)
-start = time.time()
-print("\n=== Epoch %d/%d ===\n" % (5, 6), flush=True)
-train_model("brow", [12,], 1, 1600, enable_gaze_correction=False, side='right')
-print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (5,6, time.time() - start, 0), flush=True)
-start = time.time()
-print("\n=== Epoch %d/%d ===\n" % (6, 6), flush=True)
-train_model("brow", [12,], 1, 1600, enable_gaze_correction=False, side='left')
-print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (6,6, time.time() - start, 0), flush=True)
+        dataset = CaptureDataset(BIN_FILE, all_frames=False)
 
+        print("Sample counts: %d gaze, %d lid, %d wide, %d squint, %d brow, %d total" % (len(dataset.aligned_frames_gaze), len(dataset.aligned_frames_eyes_closed), len(dataset.aligned_frames_eyes_squinted), len(dataset.aligned_frames_eyes_wide), len(dataset.aligned_frames_brow_lowered), len(dataset.aligned_frames)))
 
-TOTAL_STEPS_TRAINED_END = 1000 + 1000 + 1600 + 1600 + 1600 + 1600
+        start_time = time.time()
+        trained_model_L, trained_model_R = train_model(
+            trained_model_L,
+            trained_model_R,
+            dataset,
+            lrs=[0.001, 1e-4, 1e-4, 1e-4],
+            label_sizes=[2, 1, 2, 1]
+        )
 
-merge_models(["gaze", "blink", "brow"], [2, 2, 1])
+        print("Training model took %d seconds." % (time.time() - start_time))
 
-print("\nTraining completed successfully!\n", flush=True)
+        for e in range(len(trained_model_L)):
+            trained_model_L[e] = trained_model_L[e].cpu()
+        for e in range(len(trained_model_R)):
+            trained_model_R[e] = trained_model_R[e].cpu()
 
+        for e in range(len(trained_model_L)):
+            torch.save(trained_model_R[e].state_dict(), "right_tuned_sqwi_multiv2_%d.pth"%e)
+            torch.save(trained_model_L[e].state_dict(), "left_tuned_sqwi_multiv2_%d.pth"%e)
 
+        
 
+        device = torch.device("cpu")
+        multi = MultiInputMergedMicroChad(trained_model_L, trained_model_R)
+        multi = multi.to(device)
+        
+        dummy_input = torch.randn(1, 8, 128, 128, device=device)  # Updated to 8 channels
+        torch.onnx.export(
+            multi,
+            dummy_input,
+            sys.argv[2],
+            export_params=True,
+            opset_version=15,
+            do_constant_folding=True,
+            input_names=['input'],
+            output_names=['output'],
+            dynamic_axes={
+                'input': {0: 'batch_size'},
+                'output': {0: 'batch_size'}
+            }
+        )
+        print("Model exported to ONNX: " + sys.argv[2], flush=True)
+        print("\nTraining completed successfully!\n", flush=True)
 
-
-
-
+    main()
