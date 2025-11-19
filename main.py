@@ -2,11 +2,16 @@ from data import CaptureDataset, DatasetWrapper, worker_init_with_file
 import functools
 import time
 import random
+import multiprocessing
+multiprocessing.freeze_support() 
 
-import torch_directml
 import babble_data
 
-device = torch_directml.device()
+try:
+    import torch_directml
+    device = torch_directml.device()
+except:
+    device = "cpu"
 
 FLAG_GAZE_DATA = 1 << 0
 MODEL_NAMES = ["gaze", "blink", "widesqueeze", "brow"]
@@ -228,8 +233,6 @@ if __name__ == "__main__":
             torch.save(trained_model_R[e].state_dict(), "right_tuned_sqwi_multiv2_%d.pth"%e)
             torch.save(trained_model_L[e].state_dict(), "left_tuned_sqwi_multiv2_%d.pth"%e)
 
-        
-
         device = torch.device("cpu")
         multi = MultiInputMergedMicroChad(trained_model_L, trained_model_R)
         multi = multi.to(device)
@@ -253,3 +256,4 @@ if __name__ == "__main__":
         print("\nTraining completed successfully!\n", flush=True)
 
     main()
+
