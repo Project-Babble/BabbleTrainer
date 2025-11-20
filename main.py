@@ -207,16 +207,25 @@ class AdapterWrapper(nn.Module):
                 right_gaze_pitch, right_gaze_yaw, right_lid, right_widen, right_squeeze, right_brow]
 
 
-def merge_models(names, sizes):
+def merge_models(names, sizes, output_names):
     modelsL = []
     modelsR = []
+
+    all_names = []
+
+    for side in ["left", "right"]:
+        for name in output_names:
+            for subname in name:
+                all_names.append(side + subname)
+
     device = 'cpu'
     for i in range(len(names)):
         name = names[i]
         size = sizes[i]
 
-        sdL = torch.load("./model_" + name + "_left.pth", weights_only=False, map_location=device)
-        sdR = torch.load("./model_" + name + "_right.pth", weights_only=False, map_location=device)
+        sdL = torch.load("./model_" + name + "_left.pth", weights_only=True, map_location=device)
+        sdR = torch.load("./model_" + name + "_right.pth", weights_only=True, map_location=device)
+
 
         left = MicroChad(out_count=size).to(device)
         right = MicroChad(out_count=size).to(device)
@@ -228,7 +237,7 @@ def merge_models(names, sizes):
         modelsR.append(right)
 
     torch.onnx.export(
-        AdapterWrapper(MultiInputMergedMicroChad(modelsL, modelsR).cpu()),
+        Splitter(MultiInputMergedMicroChad(modelsL, modelsR).cpu()),
         torch.randn(1, 8, 128, 128),
         sys.argv[2],
         export_params=True,
@@ -241,6 +250,14 @@ def merge_models(names, sizes):
             'output': {0: 'batch_size'}
         }
     )
+
+    model = onnx.load(sys.argv[2])
+    names_json = json.dumps(all_names)
+    meta_prop = model.metadata_props.add()
+    meta_prop.key = 'blendshape_names'
+    meta_prop.value = names_json
+
+    onnx.save(model, sys.argv[2])
 
 TOTAL_STEPS_TRAINED = 0
 TOTAL_STEPS_TRAINED_END = 0
@@ -457,9 +474,10 @@ print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (6,6, time.time
 
 TOTAL_STEPS_TRAINED_END = 1000 + 1000 + 1600 + 1600 + 1600 + 1600
 
-merge_models(["gaze", "blink", "brow"], [2, 2, 1])
+merge_models(["gaze", "blink", "brow"], [2, 2, 1], [["EyePitch", "EyeYaw"], ["EyeLid", "EyeWiden"], ["Brow"]])
 
 print("\nTraining completed successfully!\n", flush=True)
+
 
 
 
