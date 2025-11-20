@@ -180,6 +180,8 @@ from torch.optim.lr_scheduler import LambdaLR
 from tqdm import tqdm
 import random
 import cv2
+import onnx
+import json
 
 class AdapterWrapper(nn.Module):
     def __init__(self, mmchad):
@@ -232,12 +234,12 @@ def merge_models(names, sizes, output_names):
 
         left.load_state_dict(sdL)
         right.load_state_dict(sdR)
-
+        
         modelsL.append(left)
         modelsR.append(right)
 
     torch.onnx.export(
-        Splitter(MultiInputMergedMicroChad(modelsL, modelsR).cpu()),
+        MultiInputMergedMicroChad(modelsL, modelsR).cpu(),
         torch.randn(1, 8, 128, 128),
         sys.argv[2],
         export_params=True,
