@@ -225,8 +225,8 @@ def merge_models(names, sizes, output_names):
         name = names[i]
         size = sizes[i]
 
-        sdL = torch.load("./model_" + name + "_left.pth", weights_only=True, map_location=device)
-        sdR = torch.load("./model_" + name + "_right.pth", weights_only=True, map_location=device)
+        sdL = torch.load("./model_" + name + "_left.pth", weights_only=False, map_location=device)
+        sdR = torch.load("./model_" + name + "_right.pth", weights_only=False, map_location=device)
 
 
         left = MicroChad(out_count=size).to(device)
@@ -466,7 +466,7 @@ train_model("blink", [9,13], 2, 1600, enable_gaze_correction=False, enable_noise
 print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (4,6, time.time() - start, 0), flush=True)
 start = time.time()
 print("\n=== Epoch %d/%d ===\n" % (5, 6), flush=True)
-train_model("brow", [12,], 1, 1600, enable_gaze_correction=False, side='right')
+train_model("brow", [12,], 1, 1600, enable_gaze_correction=False, side='right')e
 print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (5,6, time.time() - start, 0), flush=True)
 start = time.time()
 print("\n=== Epoch %d/%d ===\n" % (6, 6), flush=True)
@@ -479,6 +479,7 @@ TOTAL_STEPS_TRAINED_END = 1000 + 1000 + 1600 + 1600 + 1600 + 1600
 merge_models(["gaze", "blink", "brow"], [2, 2, 1], [["EyePitch", "EyeYaw"], ["EyeLid", "EyeWiden"], ["Brow"]])
 
 print("\nTraining completed successfully!\n", flush=True)
+
 
 
 
