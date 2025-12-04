@@ -24,8 +24,9 @@ jobs:
     strategy:
       matrix:
         include:
-          - { result: Linux, runs-on: ubuntu-22.04 }
-          - { result: Windows, runs-on: windows-2022 }
+          - { result: Linux-x64, runs-on: ubuntu-22.04 }
+          - { result: Windows-x64, runs-on: windows-2022 }
+          - { result: Linux-arm, runs-on: ubuntu-22.04-arm }
     
     runs-on: ${{ matrix.runs-on }}
     
@@ -59,20 +60,33 @@ jobs:
       - name: Download Windows artifact
         uses: actions/download-artifact@v4
         with:
-          name: Windows
+          name: Windows-x64
           path: ./artifacts/windows
 
       - name: Download Linux artifact
         uses: actions/download-artifact@v4
         with:
-          name: Linux
+          name: Linux-x64
           path: ./artifacts/linux
+
+      - name: Download Linux ARM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Linux-arm
+          path: ./artifacts/linux-arm
+
+      - name: Rename Artifacts
+        run: |
+          sudo mv artifacts/windows/BabbleTrainer.exe artifacts/windows/BabbleTrainer-x64.exe
+          sudo mv artifacts/linux/BabbleTrainer artifacts/linux/BabbleTrainer-x64
+          sudo mv artifacts/linux-arm/BabbleTrainer artifacts/linux-arm/BabbleTrainer-arm64
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            artifacts/windows/BabbleTrainer.exe
-            artifacts/linux/BabbleTrainer
+            artifacts/windows/BabbleTrainer-x64.exe
+            artifacts/linux/BabbleTrainer-x64
+            artifacts/linux-arm/BabbleTrainer-arm64
           tag_name: ${{ github.event.inputs.version-number }}
           prerelease: ${{ github.event.inputs.publish-pre-release }}
