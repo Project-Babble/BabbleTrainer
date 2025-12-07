@@ -1250,7 +1250,7 @@ def train_model(model, decoder, train_loader, num_epochs=10, lr=5e-5, class_step
                 optimizerE.step()
                 #progress.set_description("(%d/%d) Loss: %.6f" % (i, max_i, float(loss)))
                 #  optimizerD.step()
-                print("\rBatch %u/%u, Loss: %.6f" % (i, max_i, float(loss)), flush=True)
+                print("Batch %u/%u, Loss: %.6f" % (i, max_i, float(loss)), flush=True)
                 
                 # Print statistics
                 running_loss += loss.item()
@@ -1309,9 +1309,9 @@ def main():
     print(model_L, flush=True)
     print(model_R, flush=True)
 
-    model_L.load_state_dict(torch.load("baseline_L.pth", map_location="cpu"))
+    model_L.load_state_dict(torch.load("baseline_L.pth", map_location="cpu", weights_only=False))
     model_L.to(DEVICE)
-    model_R.load_state_dict(torch.load("baseline_R.pth", map_location="cpu"))
+    model_R.load_state_dict(torch.load("baseline_R.pth", map_location="cpu", weights_only=False))
     model_R.to(DEVICE)
     trained_model_L = model_L
     trained_model_R = model_R
