@@ -32,8 +32,42 @@ DEVICE = "cpu"
 
 if DEVICE != "mps" and DEVICE != "cuda" and sys.platform == 'win32':
     try:
-        DEVICE = torch_directml.device(0)
-    except: DEVICE = "cpu"
+        import torch_directml
+        import time
+        import torch
+
+        best_time = float("inf")
+        best_idx = None
+
+        for i in range(torch_directml.device_count()):
+            d = torch_directml.device(i)
+            torch.randn(1, device=d)
+
+            times = []
+            for _ in range(50):
+                x = torch.randn(2048, 2048, device=d)
+                start = time.time()
+                _ = x @ x
+                times.append(time.time() - start)
+
+            avg = sum(times) / len(times)
+            print(i, torch_directml.device_name(i), avg)
+
+
+            if avg < best_time:
+                best_time = avg
+                best_idx = i
+
+        if best_idx is not None:
+            DEVICE = torch_directml.device(best_idx)
+            name = torch_directml.device_name(best_idx)
+            print("Using DirectML device:", name, flush=True)
+        else:
+            DEVICE = "cpu"
+
+    except:
+        DEVICE = "cpu"
+
 
 class MicroChad(nn.Module):
     def __init__(self):
