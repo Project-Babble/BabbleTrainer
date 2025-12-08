@@ -44,7 +44,7 @@ if DEVICE != "mps" and DEVICE != "cuda" and sys.platform == 'win32':
             torch.randn(1, device=d)
 
             times = []
-            for _ in range(50):
+            for _ in range(100):
                 x = torch.randn(2048, 2048, device=d)
                 start = time.time()
                 _ = x @ x
