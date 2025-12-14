@@ -1497,7 +1497,9 @@ def main():
         dynamic_axes={
             'input': {0: 'batch_size'},
             'output': {0: 'batch_size'}
-        }
+        },
+        dynamo=True,
+        external_data=False
     )
     print("Model exported to ONNX: " + sys.argv[2], flush=True)
 
