@@ -1474,7 +1474,7 @@ def main():
         dummy_input,
         sys.argv[2],
         export_params=True,
-        opset_version=15,
+        opset_version=18,
         do_constant_folding=True,
         input_names=['input'],
         output_names=['output'],
