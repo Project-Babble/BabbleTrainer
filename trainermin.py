@@ -97,6 +97,16 @@ elif sys.platform.startswith("linux"):
 if DEVICE is None:
     DEVICE = torch.device("cpu")
 
+class GlobalMaxPool2d(nn.Module):
+    '''
+    Similar to: `nn.AdaptiveMaxPool2d(output_size=1)`
+    '''
+    def __init__(self):
+        super(GlobalMaxPool2d, self).__init__()
+    
+    def forward(self, x):
+        return nn.functional.max_pool2d(x, kernel_size=x.size()[2:]) 
+
 class MicroChad(nn.Module):
     def __init__(self):
         super(MicroChad, self).__init__()
@@ -109,7 +119,13 @@ class MicroChad(nn.Module):
         self.fc = nn.Linear(212, 3)
 
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-        self.adaptive = nn.AdaptiveMaxPool2d(output_size=1)
+        # ONNX does not support AdaptiveMaxPool2D:
+        # * https://github.com/pytorch/pytorch/issues/169949
+        # * https://github.com/pytorch/pytorch/issues/5310
+        # AdaptiveMaxPool of output size 1 can be replaced with GlobalMaxPool.
+        # Originally:
+        #   self.adaptive = nn.AdaptiveMaxPool2d(output_size=1)
+        self.adaptive = GlobalMaxPool2d()
 
         self.act = nn.ReLU(inplace=True)
         self.sigmoid = nn.Sigmoid()
