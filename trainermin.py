@@ -1,3 +1,23 @@
+# First check environment variables
+import os
+from pathlib import Path
+
+# We want to store the temporary '.pth'-files somewhere before we can
+# merge them later. Usually it's fine to put it next to the binary but
+# some setups may want to overwrite this. E.g. the binary is stored 
+# in a immutable location.
+#
+# TODO: Figure out a better default location. Using /lib or /bin, when
+# e.g. installing this as a system package, is bad and doesn't follow
+# the Linux FHS. We also need to take windows into consideration.
+tmp_dir = Path(os.environ.get('BABBLE_TRAINER_TMP_DIR', '.'))
+
+# We assume the 'baseline_*.pth'-files are near the executable. In some 
+# cases, e.g. when running from the command line, this is not always the
+# case, so let's load it from environment. 
+baseline_dir = Path(os.environ.get('BABBLE_TRAINER_BASELINE_DIR', '.'))
+
+# Continue importing rest of depedencies
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -1343,9 +1363,9 @@ def main():
     print(model_L, flush=True)
     print(model_R, flush=True)
 
-    model_L.load_state_dict(torch.load("baseline_L.pth", map_location="cpu", weights_only=False))
+    model_L.load_state_dict(torch.load(baseline_dir.joinpath("baseline_L.pth"), map_location="cpu", weights_only=False))
     model_L.to(DEVICE)
-    model_R.load_state_dict(torch.load("baseline_R.pth", map_location="cpu", weights_only=False))
+    model_R.load_state_dict(torch.load(baseline_dir.joinpath("baseline_R.pth"), map_location="cpu", weights_only=False))
     model_R.to(DEVICE)
     trained_model_L = model_L
     trained_model_R = model_R
@@ -1428,8 +1448,8 @@ def main():
     # Save the final model
     #torch.save(trained_model.state_dict(), "final_model_temporal_que_tuned_2.pth")
     
-    torch.save(trained_model_L.state_dict(), "left_tuned.pth")
-    torch.save(trained_model_R.state_dict(), "right_tuned.pth")
+    torch.save(trained_model_L.state_dict(), tmp_dir.joinpath("left_tuned.pth"))
+    torch.save(trained_model_R.state_dict(), tmp_dir.joinpath("right_tuned.pth"))
 
     multi = MultiChad()
     multi.left.load_state_dict(trained_model_L.state_dict())
