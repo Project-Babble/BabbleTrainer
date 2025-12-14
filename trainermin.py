@@ -46,11 +46,8 @@ TRAINING = True
 # Optimized alignment parameters
 WIN_SIZE_MUL = 10  # Window size multiplier for perfect accuracy
 
-DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
-
-DEVICE = "cpu"
-
-if DEVICE != "mps" and DEVICE != "cuda" and sys.platform == 'win32':
+DEVICE = None
+if sys.platform == 'win32':
     try:
         import torch_directml
         import time
@@ -87,7 +84,18 @@ if DEVICE != "mps" and DEVICE != "cuda" and sys.platform == 'win32':
 
     except:
         DEVICE = "cpu"
-
+elif sys.platform == "darwin":
+    # Apple. TODO: verify this works.
+    if torch.backends.mps.is_available():
+        DEVICE = torch.device("mps")
+elif sys.platform.startswith("linux"):
+    # Linux. Assume no DirectML, just use whatever is available.
+    if torch.cuda.is_available():
+        # This also may include ROCm, it's just opaque.
+        DEVICE = torch.device("cuda")
+# Fall back to CPU
+if DEVICE is None:
+    DEVICE = torch.device("cpu")
 
 class MicroChad(nn.Module):
     def __init__(self):
