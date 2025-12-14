@@ -30,7 +30,11 @@ try:
     import torch_directml
     device = torch_directml.device()
 except:
-    device = "cpu"
+    try:
+        import torch.cuda
+        device = torch.device('cuda')
+    except:
+        device = "cpu"
 
 print("Preparing dataset...")
 raw_jpeg_data_left = []
