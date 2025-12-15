@@ -26,11 +26,33 @@ random.seed(42)
 torch.manual_seed(42)
 np.random.seed(42)
 
-try:
-    import torch_directml
-    device = torch_directml.device()
-except:
-    device = "cpu"
+import tempfile
+
+# We want to store the temporary '.pth'-files somewhere before we can
+# merge them later. Usually it's fine to put it next to the binary but
+# some setups may want to overwrite this. E.g. the binary is stored 
+# in a immutable location such as system installs.
+tmp_dir = tempfile.TemporaryDirectory(prefix="babble-trainer")
+
+device = None
+if sys.platform == 'win32':
+    try:
+        import torch_directml
+        device = torch_directml.device()
+    except:
+        device = torch.device("cpu")
+elif sys.platform == "darwin":
+    # Apple. TODO: verify this works.
+    if torch.backends.mps.is_available():
+        device = torch.device("mps")
+elif sys.platform.startswith("linux"):
+    # Linux. Assume no DirectML, just use whatever is available.
+    if torch.cuda.is_available():
+        # This also may include ROCm, it's just opaque.
+        device = torch.device("cuda")
+# Fall back to CPU
+if device is None:
+    device = torch.device("cpu")
 
 print("Preparing dataset...")
 raw_jpeg_data_left = []
@@ -225,9 +247,8 @@ def merge_models(names, sizes, output_names):
         name = names[i]
         size = sizes[i]
 
-        sdL = torch.load("./model_" + name + "_left.pth", weights_only=False, map_location=device)
-        sdR = torch.load("./model_" + name + "_right.pth", weights_only=False, map_location=device)
-
+        sdL = torch.load(tmp_dir.name + "/model_" + name + "_left.pth", weights_only=False, map_location=device)
+        sdR = torch.load(tmp_dir.name + "/model_" + name + "_right.pth", weights_only=False, map_location=device)
 
         left = MicroChad(out_count=size).to(device)
         right = MicroChad(out_count=size).to(device)
@@ -243,14 +264,16 @@ def merge_models(names, sizes, output_names):
         torch.randn(1, 8, 128, 128),
         sys.argv[2],
         export_params=True,
-        opset_version=15,
+        opset_version=18,
         do_constant_folding=True,
         input_names=['input'],
         output_names=['output'],
         dynamic_axes={
             'input': {0: 'batch_size'},
             'output': {0: 'batch_size'}
-        }
+        },
+        dynamo=True,
+        external_data=False
     )
 
     model = onnx.load(sys.argv[2])
@@ -441,7 +464,7 @@ def train_model(kind, label_idx, class_count, steps, enable_gaze_correction=Fals
             all_L = 0
 
     loader.stop()
-    torch.save(model.state_dict(), "./model_" + kind + "_" + side+".pth")
+    torch.save(model.state_dict(), tmp_dir.name + "/model_" + kind + "_" + side+".pth")
     
     del loader
     
@@ -479,13 +502,6 @@ TOTAL_STEPS_TRAINED_END = 1000 + 1000 + 1600 + 1600 + 1600 + 1600
 merge_models(["gaze", "blink", "brow"], [2, 2, 1], [["EyePitch", "EyeYaw"], ["EyeLid", "EyeWiden"], ["Brow"]])
 
 print("\nTraining completed successfully!\n", flush=True)
-
-
-
-
-
-
-
-
+tmp_dir.cleanup()
 
 
