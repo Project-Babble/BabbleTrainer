@@ -1208,6 +1208,16 @@ if __name__ == "__main__":
     from PIL import Image, ImageFile
     from tqdm import tqdm
 
+    class GlobalMaxPool2d(nn.Module):
+        '''
+        Similar to: `nn.AdaptiveMaxPool2d(output_size=1)`
+        '''
+        def __init__(self):
+            super(GlobalMaxPool2d, self).__init__()
+
+        def forward(self, x):
+            return nn.functional.max_pool2d(x, kernel_size=x.size()[2:]) 
+
     class MicroChad(nn.Module):
         def __init__(self, out_count=2):
             super(MicroChad, self).__init__()
@@ -1221,7 +1231,7 @@ if __name__ == "__main__":
             #self.fc_exp = nn.Linear(212, 1)
 
             self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-            self.adaptive = nn.AdaptiveMaxPool2d(output_size=1)
+            self.adaptive = GlobalMaxPool2d()
 
             self.act = nn.ReLU(inplace=True)
             self.sigmoid = nn.Sigmoid()
@@ -1289,7 +1299,7 @@ if __name__ == "__main__":
 
             # --- Define shared, parameter-less layers ---
             self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-            self.adaptive = nn.AdaptiveMaxPool2d(output_size=1)
+            self.adaptive = GlobalMaxPool2d()
             self.act = nn.ReLU(inplace=True)
             self.sigmoid = nn.Sigmoid()
 
@@ -1562,14 +1572,16 @@ if __name__ == "__main__":
             dummy_input,
             sys.argv[2],
             export_params=True,
-            opset_version=15,
+            opset_version=18,
             do_constant_folding=True,
             input_names=['input'],
             output_names=['output'],
             dynamic_axes={
                 'input': {0: 'batch_size'},
                 'output': {0: 'batch_size'}
-            }
+            },
+            dynamo=True,
+            external_data=False
         )
         print("Model exported to ONNX: " + sys.argv[2], flush=True)
 
