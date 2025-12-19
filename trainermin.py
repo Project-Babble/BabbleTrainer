@@ -1,3 +1,6 @@
+import os
+from pathlib import Path
+import tempfile
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -15,6 +18,13 @@ import onnx
 from collections import deque
 from PIL import Image, ImageFile
 
+# We want to store the temporary '.pth'-files somewhere before we can
+# merge them later. Usually it's fine to put it next to the binary but
+# some setups may want to overwrite this. E.g. the binary is stored 
+# in a immutable location such as system installs.
+tmp_dir = tempfile.TemporaryDirectory(prefix="babble-trainer")
+baseline_dir = os.path.abspath(os.path.dirname(sys.argv[0]))
+
 # Constants
 FLOAT_TO_INT_CONSTANT = 1
 
@@ -26,14 +36,56 @@ TRAINING = True
 # Optimized alignment parameters
 WIN_SIZE_MUL = 10  # Window size multiplier for perfect accuracy
 
-DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
-
-DEVICE = "cpu"
-
-if DEVICE != "mps" and DEVICE != "cuda" and sys.platform == 'win32':
+DEVICE = None
+if sys.platform == 'win32':
     try:
-        DEVICE = torch_directml.device(0)
-    except: DEVICE = "cpu"
+        import torch_directml
+        import time
+        import torch
+
+        best_time = float("inf")
+        best_idx = None
+
+        for i in range(torch_directml.device_count()):
+            d = torch_directml.device(i)
+            torch.randn(1, device=d)
+
+            times = []
+            for _ in range(100):
+                x = torch.randn(2048, 2048, device=d)
+                start = time.time()
+                _ = x @ x
+                times.append(time.time() - start)
+
+            avg = sum(times) / len(times)
+            print(i, torch_directml.device_name(i), avg)
+
+
+            if avg < best_time:
+                best_time = avg
+                best_idx = i
+
+        if best_idx is not None:
+            DEVICE = torch_directml.device(best_idx)
+            name = torch_directml.device_name(best_idx)
+            print("Using DirectML device:", name, flush=True)
+        else:
+            DEVICE = "cpu"
+
+    except:
+        DEVICE = "cpu"
+elif sys.platform == "darwin":
+    # Apple. TODO: verify this works.
+    if torch.backends.mps.is_available():
+        DEVICE = torch.device("mps")
+elif sys.platform.startswith("linux"):
+    # Linux. Assume no DirectML, just use whatever is available.
+    if torch.cuda.is_available():
+        # This also may include ROCm, it's just opaque.
+        DEVICE = torch.device("cuda")
+# Fall back to CPU
+if DEVICE is None:
+    DEVICE = torch.device("cpu")
 
 class MicroChad(nn.Module):
     def __init__(self):
@@ -47,6 +99,13 @@ class MicroChad(nn.Module):
         self.fc = nn.Linear(212, 3)
 
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+        # ONNX does not support AdaptiveMaxPool2D:
+        # * https://github.com/pytorch/pytorch/issues/169949
+        # * https://github.com/pytorch/pytorch/issues/5310
+        # AdaptiveMaxPool of output size 1 can be replaced with GlobalMaxPool.
+        # Originally:
+        #   self.adaptive = nn.AdaptiveMaxPool2d(output_size=1)
+        # HOWEVER we can't export so here this lies
         self.adaptive = nn.AdaptiveMaxPool2d(output_size=1)
 
         self.act = nn.ReLU(inplace=True)
@@ -1250,7 +1309,7 @@ def train_model(model, decoder, train_loader, num_epochs=10, lr=5e-5, class_step
                 optimizerE.step()
                 #progress.set_description("(%d/%d) Loss: %.6f" % (i, max_i, float(loss)))
                 #  optimizerD.step()
-                print("\rBatch %u/%u, Loss: %.6f" % (i, max_i, float(loss)), flush=True)
+                print("Batch %u/%u, Loss: %.6f" % (i, max_i, float(loss)), flush=True)
                 
                 # Print statistics
                 running_loss += loss.item()
@@ -1309,9 +1368,9 @@ def main():
     print(model_L, flush=True)
     print(model_R, flush=True)
 
-    model_L.load_state_dict(torch.load("baseline_L.pth", map_location="cpu"))
+    model_L.load_state_dict(torch.load(os.path.join(baseline_dir, "baseline_L.pth"), map_location="cpu", weights_only=False))
     model_L.to(DEVICE)
-    model_R.load_state_dict(torch.load("baseline_R.pth", map_location="cpu"))
+    model_R.load_state_dict(torch.load(os.path.join(baseline_dir, "baseline_R.pth"), map_location="cpu", weights_only=False))
     model_R.to(DEVICE)
     trained_model_L = model_L
     trained_model_R = model_R
@@ -1394,8 +1453,8 @@ def main():
     # Save the final model
     #torch.save(trained_model.state_dict(), "final_model_temporal_que_tuned_2.pth")
     
-    torch.save(trained_model_L.state_dict(), "left_tuned.pth")
-    torch.save(trained_model_R.state_dict(), "right_tuned.pth")
+    torch.save(trained_model_L.state_dict(), os.path.join(tmp_dir.name, "left_tuned.pth"))
+    torch.save(trained_model_R.state_dict(), os.path.join(tmp_dir.name, "right_tuned.pth"))
 
     multi = MultiChad()
     multi.left.load_state_dict(trained_model_L.state_dict())
@@ -1422,6 +1481,7 @@ def main():
         }
     )
     print("Model exported to ONNX: " + sys.argv[2], flush=True)
+    tmp_dir.cleanup()
 
 if __name__ == "__main__":
     main()

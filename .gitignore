@@ -1,1 +1,5 @@
-.idea/
+/babble_data
+/__pycache__
+/build
+/dist
+/venv
