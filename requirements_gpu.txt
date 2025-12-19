@@ -1,7 +1,5 @@
---extra-index-url https://download.pytorch.org/whl/cpu
-
-# PyTorch: CPU for non-Windows
-torch==2.9.1+cpu; platform_system != "Windows"
+# PyTorch: GPU for non-Windows
+torch==2.9.1; platform_system != "Windows"
 
 # PyTorch for Windows via DirectML backend
 torch-directml; platform_system == "Windows"
