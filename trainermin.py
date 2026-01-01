@@ -106,7 +106,7 @@ class MicroChad(nn.Module):
         # Originally:
         #   self.adaptive = nn.AdaptiveMaxPool2d(output_size=1)
         # HOWEVER we can't export so here this lies
-        self.adaptive = nn.AdaptiveMaxPool2d(output_size=1)
+        #self.adaptive = nn.AdaptiveMaxPool2d(output_size=1)
 
         self.act = nn.ReLU(inplace=True)
         self.sigmoid = nn.Sigmoid()
@@ -135,7 +135,7 @@ class MicroChad(nn.Module):
         x = self.conv6(x)
         x = self.act(x)
 
-        x = self.adaptive(x)
+        x = torch.amax(x, dim=(2, 3), keepdim=True)
         x = torch.flatten(x, 1)
         if not return_blends:
             return x
