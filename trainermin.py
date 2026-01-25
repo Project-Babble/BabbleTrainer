@@ -16,17 +16,16 @@ import bisect
 # Fix stdout/stderr for PyInstaller on Windows
 if sys.platform == 'win32':
     try:
-        import codecs
         import io
-        # Try to reconfigure stdout/stderr with UTF-8 encoding and error handling
-        if hasattr(sys.stdout, 'detach'):
-            sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8', errors='replace', line_buffering=True)
-            sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8', errors='replace', line_buffering=True)
+        # Reconfigure stdout/stderr with UTF-8 encoding and error handling
+        if hasattr(sys.stdout, 'buffer'):
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
+            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
     except Exception as e:
         # If stdout/stderr aren't available (e.g., --noconsole), redirect to null
         try:
-            sys.stdout = open(os.devnull, 'w')
-            sys.stderr = open(os.devnull, 'w')
+            sys.stdout = open(os.devnull, 'w', encoding='utf-8')
+            sys.stderr = open(os.devnull, 'w', encoding='utf-8')
         except:
             pass
 
@@ -50,6 +49,9 @@ FLOAT_TO_INT_CONSTANT = 1
 FLAG_GOOD_DATA = 1 << 30  # 1073741824
 
 TRAINING = True
+
+# Disable CV2 display in headless/PyInstaller mode
+ENABLE_CV2_DISPLAY = False  # Set to True if you want visualization
 
 # Optimized alignment parameters
 WIN_SIZE_MUL = 10  # Window size multiplier for perfect accuracy
@@ -1346,9 +1348,13 @@ def train_model(model, decoder, train_loader, num_epochs=10, lr=5e-5, class_step
                     image_bgr2 = np.clip((image_bgr2 * 255), 0, 255).astype(np.uint8)
 
                     #print(inputs[0].numpy().shape)
-                    cv2.imshow("test", np.hstack((image_bgr, image_bgr2)))
-                    #cv2.imshow("out", image_bgr2)
-                    cv2.waitKey(1)
+                    if ENABLE_CV2_DISPLAY:
+                        try:
+                            cv2.imshow("test", np.hstack((image_bgr, image_bgr2)))
+                            #cv2.imshow("out", image_bgr2)
+                            cv2.waitKey(1)
+                        except:
+                            pass
             except:
                 import traceback
                 traceback.print_exc()
