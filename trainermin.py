@@ -12,6 +12,24 @@ import cv2
 import time
 import sys
 import bisect
+
+# Fix stdout/stderr for PyInstaller on Windows
+if sys.platform == 'win32':
+    try:
+        import codecs
+        import io
+        # Try to reconfigure stdout/stderr with UTF-8 encoding and error handling
+        if hasattr(sys.stdout, 'detach'):
+            sys.stdout = io.TextIOWrapper(sys.stdout.detach(), encoding='utf-8', errors='replace', line_buffering=True)
+            sys.stderr = io.TextIOWrapper(sys.stderr.detach(), encoding='utf-8', errors='replace', line_buffering=True)
+    except Exception as e:
+        # If stdout/stderr aren't available (e.g., --noconsole), redirect to null
+        try:
+            sys.stdout = open(os.devnull, 'w')
+            sys.stderr = open(os.devnull, 'w')
+        except:
+            pass
+
 if sys.platform == 'win32':
     import torch_directml
 import onnx
