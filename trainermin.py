@@ -14,20 +14,55 @@ import sys
 import bisect
 
 # Fix stdout/stderr for PyInstaller on Windows
-if sys.platform == 'win32':
-    try:
-        import io
-        # Reconfigure stdout/stderr with UTF-8 encoding and error handling
-        if hasattr(sys.stdout, 'buffer'):
-            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace', line_buffering=True)
-            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace', line_buffering=True)
-    except Exception as e:
-        # If stdout/stderr aren't available (e.g., --noconsole), redirect to null
-        try:
-            sys.stdout = open(os.devnull, 'w', encoding='utf-8')
-            sys.stderr = open(os.devnull, 'w', encoding='utf-8')
-        except:
-            pass
+if sys.platform == 'win32' and getattr(sys, 'frozen', False):
+    # Running as PyInstaller executable - stdout/stderr are broken
+    # Wrap them in a safe writer that catches encoding/write errors
+    import io
+
+    class SafeWriter:
+        """Wrapper that catches write errors and handles encoding issues"""
+        def __init__(self, stream):
+            self.stream = stream
+            self.encoding = 'utf-8'
+            self.errors = 'replace'
+
+        def write(self, text):
+            try:
+                if isinstance(text, bytes):
+                    text = text.decode(self.encoding, self.errors)
+                # Try writing to the original stream
+                self.stream.write(text)
+                return len(text)
+            except (OSError, IOError, UnicodeError):
+                # If write fails, try with binary stdout
+                try:
+                    if hasattr(self.stream, 'buffer'):
+                        encoded = text.encode(self.encoding, self.errors)
+                        self.stream.buffer.write(encoded)
+                        return len(text)
+                except:
+                    pass
+                # Silently ignore if all attempts fail
+                return len(text)
+
+        def flush(self):
+            try:
+                self.stream.flush()
+            except (OSError, IOError):
+                pass
+
+        def close(self):
+            try:
+                self.stream.close()
+            except (OSError, IOError):
+                pass
+
+        def isatty(self):
+            return False
+
+    # Wrap stdout and stderr with safe writers
+    sys.stdout = SafeWriter(sys.stdout)
+    sys.stderr = SafeWriter(sys.stderr)
 
 if sys.platform == 'win32':
     import torch_directml
