@@ -13,56 +13,119 @@ import time
 import sys
 import bisect
 
-# Fix stdout/stderr for PyInstaller on Windows
-if sys.platform == 'win32' and getattr(sys, 'frozen', False):
-    # Running as PyInstaller executable - stdout/stderr are broken
-    # Wrap them in a safe writer that catches encoding/write errors
-    import io
+# Setup logging to file and stdout (tee behavior)
+import io
+import datetime
 
-    class SafeWriter:
-        """Wrapper that catches write errors and handles encoding issues"""
-        def __init__(self, stream):
-            self.stream = stream
-            self.encoding = 'utf-8'
-            self.errors = 'replace'
+# Create log file
+exe_dir = os.path.abspath(os.path.dirname(sys.argv[0]))
+log_file_path = os.path.join(exe_dir, 'trainer_output.log')
 
-        def write(self, text):
+try:
+    log_file = open(log_file_path, 'w', encoding='utf-8', buffering=1)
+    # Write launch arguments first
+    log_file.write(f"=== BabbleTrainer Log ===\n")
+    log_file.write(f"Started: {datetime.datetime.now()}\n")
+    log_file.write(f"Launch arguments: {' '.join(sys.argv)}\n")
+    log_file.write(f"{'='*50}\n\n")
+    log_file.flush()
+except:
+    log_file = None
+
+class TeeWriter:
+    """Writes to both stdout/stderr and a log file"""
+    def __init__(self, stream, log_file):
+        self.stream = stream
+        self.log_file = log_file
+        self.encoding = getattr(stream, 'encoding', 'utf-8') or 'utf-8'
+        self.errors = getattr(stream, 'errors', 'replace') or 'replace'
+        # Expose standard file attributes for compatibility
+        self.mode = getattr(stream, 'mode', 'w')
+        self.name = getattr(stream, 'name', '<stdout>')
+        self.closed = False
+        self.line_buffering = getattr(stream, 'line_buffering', False)
+
+    def write(self, text):
+        # Handle None or empty text gracefully
+        if text is None:
+            return 0
+
+        if isinstance(text, bytes):
+            text = text.decode(self.encoding, self.errors)
+
+        # Write to log file first (always works)
+        if self.log_file and not self.log_file.closed:
             try:
-                if isinstance(text, bytes):
-                    text = text.decode(self.encoding, self.errors)
-                # Try writing to the original stream
-                self.stream.write(text)
-                return len(text)
-            except (OSError, IOError, UnicodeError):
-                # If write fails, try with binary stdout
-                try:
-                    if hasattr(self.stream, 'buffer'):
-                        encoded = text.encode(self.encoding, self.errors)
-                        self.stream.buffer.write(encoded)
-                        return len(text)
-                except:
-                    pass
-                # Silently ignore if all attempts fail
-                return len(text)
-
-        def flush(self):
-            try:
-                self.stream.flush()
-            except (OSError, IOError):
+                self.log_file.write(text)
+            except:
                 pass
 
-        def close(self):
+        # Then try to write to stdout/stderr for piping
+        try:
+            self.stream.write(text)
+            return len(text)
+        except (OSError, IOError, UnicodeError):
+            # If write fails, try with binary mode
             try:
-                self.stream.close()
-            except (OSError, IOError):
+                if hasattr(self.stream, 'buffer'):
+                    encoded = text.encode(self.encoding, self.errors)
+                    self.stream.buffer.write(encoded)
+                    return len(text)
+            except:
                 pass
+        return len(text)
 
-        def isatty(self):
+    def writelines(self, lines):
+        """Write a list of lines"""
+        for line in lines:
+            self.write(line)
+
+    def flush(self):
+        if self.log_file and not self.log_file.closed:
+            try:
+                self.log_file.flush()
+            except:
+                pass
+        try:
+            self.stream.flush()
+        except (OSError, IOError):
+            pass
+
+    def close(self):
+        if self.log_file and not self.log_file.closed:
+            try:
+                self.log_file.close()
+            except:
+                pass
+        # Don't close the original stream (stdout/stderr) - it's owned by the interpreter
+        # Closing it causes OSError [Errno 22] on Windows during shutdown
+        self.closed = True
+
+    def isatty(self):
+        try:
+            return self.stream.isatty()
+        except:
             return False
 
-    # Wrap stdout and stderr with safe writers
-    sys.stdout = SafeWriter(sys.stdout)
-    sys.stderr = SafeWriter(sys.stderr)
+    def fileno(self):
+        """Return the file descriptor - critical for low-level I/O redirection"""
+        try:
+            return self.stream.fileno()
+        except:
+            raise AttributeError("TeeWriter: underlying stream has no fileno()")
+
+    def readable(self):
+        return False
+
+    def writable(self):
+        return True
+
+    def seekable(self):
+        return False
+
+# Always use TeeWriter to write to both console and log file
+sys.stdout = TeeWriter(sys.stdout, log_file)
+sys.stderr = TeeWriter(sys.stderr, log_file)
 
 if sys.platform == 'win32':
     import torch_directml
