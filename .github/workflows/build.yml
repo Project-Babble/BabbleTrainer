@@ -82,6 +82,11 @@ jobs:
           sudo mv artifacts/linux/BabbleTrainer artifacts/linux/BabbleTrainer-x64
           sudo mv artifacts/linux-arm/BabbleTrainer artifacts/linux-arm/BabbleTrainer-arm64
 
+      - name: Change Permissions
+        run: |
+          chmod +x artifacts/linux/BabbleTrainer-x64
+          chmod +x artifacts/linux-arm/BabbleTrainer-arm64
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
