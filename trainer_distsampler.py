@@ -2,6 +2,8 @@ import cv2
 import numpy as np
 import random
 import torch
+import multiprocessing
+
 from torch.utils.data import Dataset
 import struct
 import bisect
@@ -11,6 +13,13 @@ from PIL import Image, ImageFile
 import binascii
 import os
 import time
+import json
+
+
+import torch_directml
+
+device = torch_directml.device()
+
 
 def calculate_row_pattern_consistency(image):
     """
@@ -1112,9 +1121,10 @@ class CaptureDataset(Dataset):
 
 
 class DatasetWrapper(Dataset):
-    def __init__(self, batcher_fn, num_epochs, batch_size, steps_per_batch):
+    def __init__(self, batcher_fn, num_epochs, batch_size, steps_per_batch, file):
         self.batcher_fn = batcher_fn
         self.train_loader = None
+        self.file = file
         self.num_epochs = num_epochs
         self.batch_size = batch_size
         self.steps_per_batch = steps_per_batch
@@ -1133,7 +1143,7 @@ def worker_init(worker_id):
     np.random.seed(worker_id)
     random.seed(worker_id)
     time.sleep(1)
-    dataset.train_loader = CaptureDataset('G:\\Baballonia.Setup.v1.1.0.8\\user_cal.bin', all_frames=False)
+    dataset.train_loader = CaptureDataset(dataset.file, all_frames=False)
 
 
 def batcher_gaze(train_loader):
@@ -1183,14 +1193,15 @@ TRAINING = True
 # Optimized alignment parameters
 WIN_SIZE_MUL = 10  # Window size multiplier for perfect accuracy
 
-DEVICE = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
+#DEVICE = #"mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
 
-DEVICE = "cuda"
+DEVICE = device#"cuda"
 
 MODEL_NAMES = ["gaze", "blink", "widesqueeze", "brow"]
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     import torch
     import torch.nn as nn
     import torch.optim as optim
@@ -1208,16 +1219,6 @@ if __name__ == "__main__":
     from PIL import Image, ImageFile
     from tqdm import tqdm
 
-    class GlobalMaxPool2d(nn.Module):
-        '''
-        Similar to: `nn.AdaptiveMaxPool2d(output_size=1)`
-        '''
-        def __init__(self):
-            super(GlobalMaxPool2d, self).__init__()
-
-        def forward(self, x):
-            return nn.functional.max_pool2d(x, kernel_size=x.size()[2:]) 
-
     class MicroChad(nn.Module):
         def __init__(self, out_count=2):
             super(MicroChad, self).__init__()
@@ -1231,7 +1232,7 @@ if __name__ == "__main__":
             #self.fc_exp = nn.Linear(212, 1)
 
             self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
-            self.adaptive = GlobalMaxPool2d()
+            self.adaptive = nn.MaxPool2d(kernel_size=4)
 
             self.act = nn.ReLU(inplace=True)
             self.sigmoid = nn.Sigmoid()
@@ -1299,7 +1300,7 @@ if __name__ == "__main__":
 
             # --- Define shared, parameter-less layers ---
             self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-            self.adaptive = GlobalMaxPool2d()
+            self.adaptive = nn.MaxPool2d(kernel_size=4)
             self.act = nn.ReLU(inplace=True)
             self.sigmoid = nn.Sigmoid()
 
@@ -1399,7 +1400,7 @@ if __name__ == "__main__":
                 
             return outputs
 
-    def train_model(models_left, models_right, decoder, train_loader, num_epochs=10, lr=5e-5, class_step=False, e_add = 0, e_total = 0, exp_stage=False, lrs=[], label_sizes=[], aug_levels=[]):
+    def train_model(models_left, models_right, decoder, train_loader, file, num_epochs=10, lr=5e-5, class_step=False, e_add = 0, e_total = 0, exp_stage=False, lrs=[], label_sizes=[], aug_levels=[]):
 
         device = DEVICE#torch.device("cuda:0")
         print(f"Using device: {device}", flush=True)
@@ -1451,8 +1452,8 @@ if __name__ == "__main__":
             
             return torch.stack(inputs_left, dim=0), torch.stack(inputs_right, dim=0), torch.stack(labels_left, dim=0), torch.stack(labels_right, dim=0), torch.stack(gaze_states, dim=0)
 
-        def train_one_model(num_epochs, steps_per_epoch, model_idx, batcher_fn):
-            dataloader = DataLoader(DatasetWrapper(batcher_fn, num_epochs, 32, steps_per_epoch), batch_size=32, shuffle=True, num_workers=8, worker_init_fn=worker_init, pin_memory=True)
+        def train_one_model(num_epochs, steps_per_epoch, model_idx, batcher_fn, file):
+            dataloader = DataLoader(DatasetWrapper(batcher_fn, num_epochs, 32, steps_per_epoch, file), batch_size=32, shuffle=True, num_workers=8, worker_init_fn=worker_init, pin_memory=True)
             
             print("\nTraining %s:" % (MODEL_NAMES[model_idx]))
             optim_left = optimizersL[model_idx]
@@ -1504,15 +1505,15 @@ if __name__ == "__main__":
                 total_time = time.time() - start_time
                 print(" - Epoch average: %.4f, time: %.1fs" % (all_loss / steps_per_epoch, total_time))
 
-        GAZE_EPOCHS = 32
+        GAZE_EPOCHS = 48
         BLINK_EPOCHS = 32
         SQWI_EPOCHS = 32
         BROW_EPOCHS = 32
 
-        train_one_model(GAZE_EPOCHS, EPOCH_SIZE, 0, batcher_gaze)
-        train_one_model(BLINK_EPOCHS, EPOCH_SIZE, 1, batcher_lid)
-        train_one_model(SQWI_EPOCHS, EPOCH_SIZE, 2, batcher_wide_squeeze)
-        train_one_model(BROW_EPOCHS, EPOCH_SIZE, 3, batcher_brow)
+        train_one_model(GAZE_EPOCHS, EPOCH_SIZE, 0, batcher_gaze, file)
+        train_one_model(BLINK_EPOCHS, EPOCH_SIZE, 1, batcher_lid, file)
+        train_one_model(SQWI_EPOCHS, EPOCH_SIZE, 2, batcher_wide_squeeze, file)
+        train_one_model(BROW_EPOCHS, EPOCH_SIZE, 3, batcher_brow, file)
 
         return models_left, models_right, epoch_losses, batch_losses
 
@@ -1533,7 +1534,10 @@ if __name__ == "__main__":
 
         EPOCHS = 42
 
-        dataset = CaptureDataset('G:\\Baballonia.Setup.v1.1.0.8\\user_cal.bin', all_frames=False)
+        file = sys.argv[1]
+        output_file = sys.argv[2]
+
+        dataset = CaptureDataset(file, all_frames=False)
 
         train_dataset = dataset
         train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True, num_workers=0)
@@ -1542,7 +1546,8 @@ if __name__ == "__main__":
             trained_model_L,
             trained_model_R,
             None,
-            dataset, 
+            dataset,
+            file,
             num_epochs=EPOCHS,
             lr=0.001,
             class_step=True, 
@@ -1561,6 +1566,9 @@ if __name__ == "__main__":
         print("\nTraining completed successfully!\n", flush=True)
 
         device = torch.device("cpu")
+        trained_model_L = [ trained_model_L[e].cpu() for e in range(len(trained_model_L)) ]
+        trained_model_R = [ trained_model_R[e].cpu() for e in range(len(trained_model_R)) ]
+
         multi = MultiInputMergedMicroChad(trained_model_L, trained_model_R)
 
         device = torch.device("cpu")
@@ -1570,7 +1578,7 @@ if __name__ == "__main__":
         torch.onnx.export(
             multi,
             dummy_input,
-            sys.argv[2],
+            output_file,
             export_params=True,
             opset_version=18,
             do_constant_folding=True,
@@ -1580,9 +1588,25 @@ if __name__ == "__main__":
                 'input': {0: 'batch_size'},
                 'output': {0: 'batch_size'}
             },
-            dynamo=True,
-            external_data=False
         )
+
+        # 2 1 2 1 
+        #model1 = [norm_pitchL, norm_yawL]
+        #model2 = [left_lid]
+        #model3 = [routine_widen, routine_squint]
+        #model4 = [routine_brow_angry]
+
+        exprs = ['EyeX', 'EyeY', 'EyeLid', 'Widen', 'Squint', 'BrowAngry']
+        all_names = ['left' + e for e in exprs] + ['right' + e for e in exprs]
+
+        # add metadata
+        model = onnx.load(output_file)
+        names_json = json.dumps(all_names)
+        meta_prop = model.metadata_props.add()
+        meta_prop.key = 'blendshape_names'
+        meta_prop.value = names_json
+        onnx.save(model, output_file)
+
         print("Model exported to ONNX: " + sys.argv[2], flush=True)
 
     main()

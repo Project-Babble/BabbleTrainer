@@ -11,11 +11,11 @@ if sys.platform == 'win32':
     print(Binaries)
 
 a = Analysis(
-    ['main.py'],
+    ['trainer_distsampler.py'],
     pathex=[],
     binaries=Binaries,
     datas=[],
-    hiddenimports=[],
+    hiddenimports=['onnx', 'onnx.onnx_cpp2py_export'], 
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
