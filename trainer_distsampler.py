@@ -1489,7 +1489,7 @@ if __name__ == "__main__":
 
                     optim_left.step()
                     optim_right.step()
-                    print("\r[%s(%d/%d)][%d/%d][%u/%u] loss: %.4f, lr: %.5f" % (MODEL_NAMES[model_idx], model_idx+1, len(MODEL_NAMES), epoch, num_epochs, step, EPOCH_SIZE, float(loss), float(optim_left.param_groups[0]['lr'])), flush=True, end='')
+                    print("\rBatch %u/%u, Loss: %.6f" % (steps_per_epoch * epoch + step, steps_per_epoch * num_epochs , float(loss)), flush=True) #print("\r[%s(%d/%d)][%d/%d][%u/%u] loss: %.4f, lr: %.5f" % (MODEL_NAMES[model_idx], model_idx+1, len(MODEL_NAMES), epoch, num_epochs, step, EPOCH_SIZE, float(loss), float(optim_left.param_groups[0]['lr'])), flush=True, end='')
                     all_loss += float(loss)
 
                     if epoch < 5:
@@ -1505,9 +1505,19 @@ if __name__ == "__main__":
         SQWI_EPOCHS = 24#332
         BROW_EPOCHS = 32# 32
 
+        print("\n=== Epoch %d/%d ===\n" % (1, 3), flush=True)
+        start = time.time()
         train_one_model(GAZE_EPOCHS, EPOCH_SIZE, 0, batcher_gaze, file)
+        print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (1,3, time.time() - start, 0), flush=True)
+        start = time.time()
+        print("\n=== Epoch %d/%d ===\n" % (2, 3), flush=True)
         train_one_model(SQWI_EPOCHS, EPOCH_SIZE, 1, batcher_wide_squeeze, file)
+        print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (2,3, time.time() - start, 0), flush=True)
+        start = time.time()
+        print("\n=== Epoch %d/%d ===\n" % (3, 3), flush=True)
         train_one_model(BROW_EPOCHS, EPOCH_SIZE, 2, batcher_brow, file)
+        print("\nEpoch %d/%d completed in %.2fs. Average loss: %.6f\n" % (3,3, time.time() - start, 0), flush=True)
+        
 
         return models_left, models_right, epoch_losses, batch_losses
 
@@ -1557,8 +1567,6 @@ if __name__ == "__main__":
             torch.save(trained_model_R[e].state_dict(), "right_tuned_sqwi_multiv2_%d.pth"%e)
             torch.save(trained_model_L[e].state_dict(), "left_tuned_sqwi_multiv2_%d.pth"%e)
 
-        print("\nTraining completed successfully!\n", flush=True)
-
         device = torch.device("cpu")
         trained_model_L = [ trained_model_L[e].cpu() for e in range(len(trained_model_L)) ]
         trained_model_R = [ trained_model_R[e].cpu() for e in range(len(trained_model_R)) ]
@@ -1602,5 +1610,6 @@ if __name__ == "__main__":
         onnx.save(model, output_file)
 
         print("Model exported to ONNX: " + sys.argv[2], flush=True)
+        print("\nTraining completed successfully!\n", flush=True)
 
     main()
