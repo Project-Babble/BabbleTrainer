@@ -1036,39 +1036,9 @@ class CaptureDataset(Dataset):
             print("INVALID VALUE ENCOUNTERED!", flush=True)
             quit()
 
-
-        # invert lid labels
-        if left_lid == 0.5: 
-            pass
-        if left_lid < 0.5:
-            norm_pitchL = 0.5
-            norm_yawL = 0.5
-            left_lid = 1
-        else:
-            left_lid = 0.3
-
-        if right_lid == 0.5:
-            pass
-        if right_lid < 0.5:
-            norm_pitchR = 0.5
-            norm_yawR = 0.5
-            right_lid = 1
-        else:
-            right_lid = 0.3
-
-        # 0 is open, 1 is closed
-
-        if routine_squint > 0.5:
-            left_lid = 0.7
-            right_lid = 0.7
-        if routine_widen > 0.5:
-            left_lid = 0
-            right_lid = 0
-
     
-        label_left = np.array([norm_pitchL, norm_yawL, left_lid, routine_widen, routine_squint, routine_brow_angry], dtype=np.float32)
-        #else:
-        label_right = np.array([norm_pitchR, norm_yawR, right_lid, routine_widen, routine_squint, routine_brow_angry], dtype=np.float32)
+        label_left = np.array([norm_pitchL, norm_yawL, 1-left_lid, routine_widen, routine_squint, routine_brow_angry], dtype=np.float32)
+        label_right = np.array([norm_pitchR, norm_yawR, 1-right_lid, routine_widen, routine_squint, routine_brow_angry], dtype=np.float32)
 
         is_gaze_frame = routine_state & FLAG_GAZE_DATA
 
@@ -1147,28 +1117,37 @@ def worker_init(worker_id):
 
 
 def batcher_gaze(train_loader):
-    return train_loader.get_next_gaze()
+    f = random.random()
+    if f > 0.8:
+        return train_loader.get_next_closed()
+    else:
+        return train_loader.get_next_gaze()
 
 def batcher_lid(train_loader): #todo better weighting just threw this together
     f = random.random()
-    if f > 0.5:
-        if f < 0.75:
-            if f < 0.6:
-                return train_loader.get_next_gaze()
-            else:
-                return train_loader.get_next_angry()
-        elif f > 0.875:
+    if f > 0.2:
+        if f > 0.9:
+            return train_loader.get_next_angry()
+        else:
+            return train_loader.get_next_gaze()
+    else:
+        f = random.random()
+        if f > 0.5:
+            return train_loader.get_next_closed()
+        elif f > 0.25:
             return train_loader.get_next_wide()
         else:
             return train_loader.get_next_squint()
-    else:
-        return train_loader.get_next_closed()
-    #return train_loader.get_next_gaze() if random.random() > 0.5 else train_loader.get_next_closed()
 
 def batcher_wide_squeeze(train_loader):
     f = random.random()
     if f > 0.5:
-        return train_loader.get_next_gaze()
+        if f > 0.9:
+            return train_loader.get_next_closed()
+        elif f > 0.8:
+            return train_loader.get_next_angry()
+        else:
+            return train_loader.get_next_gaze()
     elif f > 0.25:
         return train_loader.get_next_wide()
     else:
@@ -1177,9 +1156,19 @@ def batcher_wide_squeeze(train_loader):
 def batcher_brow(train_loader):
     f = random.random()
     if f > 0.5:
-        return batcher_wide_squeeze(train_loader)
+        if f > 0.9:
+            return train_loader.get_next_closed()
+        elif f > 0.85:
+            return train_loader.get_next_squint()
+        elif f > 0.725:
+            return train_loader.get_next_wide()
+        else:
+            return train_loader.get_next_gaze()
+        
     else:
         return train_loader.get_next_angry()
+
+
 
 # Constants
 FLOAT_TO_INT_CONSTANT = 1
@@ -1313,7 +1302,6 @@ if __name__ == "__main__":
                 # Get layers from all models for merging
                 all_original_layers = [getattr(model, layer_name) for model in self.all_models]
                 out_c, in_c, k_h, k_w = all_original_layers[0].weight.shape
-                
                 if i == 0:
                     # --- SPECIAL HANDLING FOR THE FIRST CONV LAYER ---
                     # This layer will perform the input routing.
@@ -1367,6 +1355,14 @@ if __name__ == "__main__":
                 setattr(self, layer_name, merged_layer)
 
         def forward(self, x):
+            # rearrange
+            inputs_left = x[:, [0, 2, 4, 6], :, :]
+            inputs_right = x[:, [1, 3, 5, 7], :, :]
+            x = torch.cat([inputs_left, inputs_right], dim=1)
+            #N, C, H, W = x.shape
+            #x = x.view(1, 4, 2, 128, 128).permute(0, 2, 1, 3, 4).reshape(1, 8, 128, 128)
+
+
             # The forward pass is simple because conv1 handles the routing.
             x = self.act(self.conv1(x))
             x = self.pool(x)
@@ -1398,7 +1394,7 @@ if __name__ == "__main__":
                 output = self.sigmoid(output)
                 outputs.append(output)
                 
-            return outputs
+            return torch.cat(outputs, dim=-1)
 
     def train_model(models_left, models_right, decoder, train_loader, file, num_epochs=10, lr=5e-5, class_step=False, e_add = 0, e_total = 0, exp_stage=False, lrs=[], label_sizes=[], aug_levels=[]):
 
@@ -1505,15 +1501,13 @@ if __name__ == "__main__":
                 total_time = time.time() - start_time
                 print(" - Epoch average: %.4f, time: %.1fs" % (all_loss / steps_per_epoch, total_time))
 
-        GAZE_EPOCHS = 48
-        BLINK_EPOCHS = 32
-        SQWI_EPOCHS = 32
-        BROW_EPOCHS = 32
+        GAZE_EPOCHS = 32#48
+        SQWI_EPOCHS = 24#332
+        BROW_EPOCHS = 32# 32
 
         train_one_model(GAZE_EPOCHS, EPOCH_SIZE, 0, batcher_gaze, file)
-        train_one_model(BLINK_EPOCHS, EPOCH_SIZE, 1, batcher_lid, file)
-        train_one_model(SQWI_EPOCHS, EPOCH_SIZE, 2, batcher_wide_squeeze, file)
-        train_one_model(BROW_EPOCHS, EPOCH_SIZE, 3, batcher_brow, file)
+        train_one_model(SQWI_EPOCHS, EPOCH_SIZE, 1, batcher_wide_squeeze, file)
+        train_one_model(BROW_EPOCHS, EPOCH_SIZE, 2, batcher_brow, file)
 
         return models_left, models_right, epoch_losses, batch_losses
 
@@ -1526,8 +1520,8 @@ if __name__ == "__main__":
         np.random.seed(42)
         random.seed(42)
         
-        model_L=[MicroChad(out_count=2),MicroChad(out_count=1),MicroChad(out_count=2),MicroChad(out_count=1)]
-        model_R=[MicroChad(out_count=2),MicroChad(out_count=1),MicroChad(out_count=2),MicroChad(out_count=1)]
+        model_L=[MicroChad(out_count=3),MicroChad(out_count=2),MicroChad(out_count=1)]
+        model_R=[MicroChad(out_count=3),MicroChad(out_count=2),MicroChad(out_count=1)]
 
         trained_model_L = model_L
         trained_model_R = model_R
@@ -1554,9 +1548,9 @@ if __name__ == "__main__":
             exp_stage=False,
             e_add = 0,
             e_total = EPOCHS,
-            lrs=[0.001, 1e-4, 1e-4, 1e-4],
-            label_sizes=[2, 1, 2, 1],
-            aug_levels=[0, 1, 2, 2]
+            lrs=[0.001, 1e-4, 1e-4],
+            label_sizes=[3, 2, 1],
+            aug_levels=[0, 2, 2]
         )
 
         for e in range(len(trained_model_L)):
@@ -1596,8 +1590,8 @@ if __name__ == "__main__":
         #model3 = [routine_widen, routine_squint]
         #model4 = [routine_brow_angry]
 
-        exprs = ['EyeX', 'EyeY', 'EyeLid', 'Widen', 'Squint', 'BrowAngry']
-        all_names = ['left' + e for e in exprs] + ['right' + e for e in exprs]
+        exprs = ['EyeY', 'EyeX', 'EyeLid', 'EyeWiden', 'EyeSquint', 'EyeBrow']
+        all_names = ['right' + e for e in exprs] + ['left' + e for e in exprs]
 
         # add metadata
         model = onnx.load(output_file)
