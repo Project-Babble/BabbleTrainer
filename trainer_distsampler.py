@@ -397,6 +397,48 @@ def apply_blur(image, max_kernel_size=5):
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters())
 
+
+def sigreg_strong_loss(x, sketch_dim=64):
+    """
+    Forces ECF(x) ~ ECF(Gaussian).
+    Matches ALL Moments (Maximum Entropy Cloud).
+    Exact implementation of LeJEPA Algorithm 1, written with real-valued
+    cos/sin terms instead of complex tensors so it works on DirectML too.
+    """
+    N, C = x.size()
+
+    # 1. Projection (The Observer)
+    # Project channels down to sketch_dim
+    A = torch.randn(C, sketch_dim, device=x.device, dtype=x.dtype)
+    A = A / (A.norm(p=2, dim=0, keepdim=True) + 1e-6)
+
+    # 2. Integration Points
+    t = torch.linspace(-5, 5, 17, device=x.device, dtype=x.dtype)
+
+    # 3. Theoretical Gaussian CF
+    exp_f = torch.exp(-0.5 * t**2)
+
+    # 4. Empirical CF
+    # proj: [N, sketch_dim]
+    proj = x @ A
+
+    # args: [N, sketch_dim, T]
+    args = proj.unsqueeze(2) * t.view(1, 1, -1)
+
+    # ecf: [sketch_dim, T] (Mean over batch)
+    ecf_real = torch.cos(args).mean(dim=0)
+    ecf_imag = torch.sin(args).mean(dim=0)
+
+    # 5. Weighted L2 Distance
+    # |ecf - gauss|^2 * gauss_weight
+    diff_sq = (ecf_real - exp_f.unsqueeze(0)).square() + ecf_imag.square()
+    err = diff_sq * exp_f.unsqueeze(0)
+
+    # 6. Integrate
+    loss = torch.trapz(err, t, dim=1) * N
+
+    return loss.mean()
+
 def decode_jpeg(jpeg_data):
     """
     Decode JPEG data to an OpenCV image with robust error handling.
@@ -1179,6 +1221,11 @@ FLAG_GAZE_DATA = 1 << 0
 
 TRAINING = True
 
+# SigReg regularization on encoder features before the final linear layer.
+# Keep the weight small because the loss is batch-scaled in Algorithm 1.
+SIGREG_SKETCH_DIM = 64
+SIGREG_LOSS_WEIGHT = 1e-3
+
 # Optimized alignment parameters
 WIN_SIZE_MUL = 10  # Window size multiplier for perfect accuracy
 
@@ -1226,7 +1273,7 @@ if __name__ == "__main__":
             self.act = nn.ReLU(inplace=True)
             self.sigmoid = nn.Sigmoid()
 
-        def forward(self, x, return_blends=True):
+        def forward(self, x, return_blends=True, return_features=False):
             x = self.conv1(x)
             x = self.act(x)
             x = self.pool(x)
@@ -1251,7 +1298,7 @@ if __name__ == "__main__":
             x = self.act(x)
 
             x = self.adaptive(x)
-            x = torch.flatten(x, 1)
+            features = torch.flatten(x, 1)
 
             #y = self.fc_exp(x)
             #y = self.sigmoid(y)
@@ -1259,10 +1306,13 @@ if __name__ == "__main__":
             #if not return_blends:
             #    return x
             
-            x = self.fc_gaze(x)
+            x = self.fc_gaze(features)
             x = self.sigmoid(x)
 
             #x = torch.cat([x, y], dim=-1)
+
+            if return_features:
+                return x, features
 
             return x
 
@@ -1479,11 +1529,15 @@ if __name__ == "__main__":
                     optim_left.zero_grad()
                     optim_right.zero_grad()
 
-                    predL = model_left(inputs_left.to(DEVICE))
-                    predR = model_right(inputs_right.to(DEVICE))
+                    predL, featuresL = model_left(inputs_left.to(DEVICE), return_features=True)
+                    predR, featuresR = model_right(inputs_right.to(DEVICE), return_features=True)
 
                     loss = criterion(predL, labels_left[:, label_start_idx:label_end_idx].to(DEVICE))
                     loss += criterion(predR, labels_right[:, label_start_idx:label_end_idx].to(DEVICE))
+                    loss += SIGREG_LOSS_WEIGHT * (
+                        sigreg_strong_loss(featuresL, sketch_dim=SIGREG_SKETCH_DIM) +
+                        sigreg_strong_loss(featuresR, sketch_dim=SIGREG_SKETCH_DIM)
+                    )
 
                     loss.backward()
 
