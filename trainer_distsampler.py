@@ -14,11 +14,16 @@ import binascii
 import os
 import time
 import json
+import io
 
 
-import torch_directml
+def get_training_device():
+    if not torch.cuda.is_available():
+        raise RuntimeError("CUDA is required for trainer_distsampler.py but torch.cuda.is_available() is False")
+    return torch.device("cuda")
 
-device = torch_directml.device()
+
+device = get_training_device()
 
 
 def calculate_row_pattern_consistency(image):
@@ -1231,7 +1236,7 @@ WIN_SIZE_MUL = 10  # Window size multiplier for perfect accuracy
 
 #DEVICE = #"mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
 
-DEVICE = device#"cuda"
+DEVICE = device
 
 MODEL_NAMES = ["gaze", "blink", "widesqueeze", "brow"]
 
