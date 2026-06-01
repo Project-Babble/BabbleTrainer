@@ -495,6 +495,119 @@ def decode_jpeg(jpeg_data):
         
         return error_img
 
+def _soft_label_feature(jpeg_data):
+    """Compact eye-image feature for self-calibrated soft label extraction."""
+    img = decode_jpeg(jpeg_data)
+    if len(img.shape) == 3:
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    img = cv2.equalizeHist(img)
+    img = cv2.resize(img, (16, 16), interpolation=cv2.INTER_AREA)
+    return (img.astype(np.float32) / 255.0).reshape(-1)
+
+
+def _smooth_1d(values, window=31):
+    if len(values) == 0 or window <= 1:
+        return values
+    window = min(window, (len(values) // 2) * 2 + 1)
+    if window <= 1:
+        return values
+    pad = window // 2
+    padded = np.pad(values, (pad, pad), mode='edge')
+    kernel = np.hanning(window).astype(np.float32)
+    kernel /= np.sum(kernel)
+    return np.convolve(padded, kernel, mode='valid')
+
+
+def _prototype_soft_scores(features, neutral_mask, positive_mask):
+    """
+    Convert a hard binary expression segment into image-derived soft labels.
+
+    We build a neutral prototype from gaze frames and a positive prototype from
+    the target expression frames, then project every frame onto the neutral ->
+    expression direction. Robust percentile calibration maps neutral p95 to 0
+    and expression p90 to 1. This gives a simple, efficient, data-derived
+    intensity target without needing new hand labels.
+    """
+    if np.sum(neutral_mask) < 8 or np.sum(positive_mask) < 8:
+        return positive_mask.astype(np.float32)
+
+    neutral_proto = np.median(features[neutral_mask], axis=0)
+    positive_proto = np.median(features[positive_mask], axis=0)
+    direction = positive_proto - neutral_proto
+    denom = float(np.dot(direction, direction) + 1e-6)
+
+    raw = (features - neutral_proto) @ direction / denom
+    lo = np.quantile(raw[neutral_mask], 0.95)
+    hi = np.quantile(raw[positive_mask], 0.90)
+    if hi <= lo + 1e-6:
+        lo = np.quantile(raw[neutral_mask], 0.50)
+        hi = np.quantile(raw[positive_mask], 0.50)
+    if hi <= lo + 1e-6:
+        return positive_mask.astype(np.float32)
+
+    scores = np.clip((raw - lo) / (hi - lo + 1e-6), 0.0, 1.0).astype(np.float32)
+    scores = np.where(positive_mask, scores, 0.0).astype(np.float32)
+    scores = _smooth_1d(scores, SOFT_LABEL_SMOOTHING_WINDOW).astype(np.float32)
+    return np.where(positive_mask, np.clip(scores, 0.0, 1.0), 0.0).astype(np.float32)
+
+
+def apply_soft_expression_labels(final_frames, cache_key=None):
+    """Replace binary expression targets with self-calibrated floating labels."""
+    if not USE_SOFT_EXPRESSION_LABELS or len(final_frames) == 0:
+        return final_frames
+
+    cache_path = None
+    if cache_key is not None:
+        cache_path = "./soft_label_db_%d.pt" % cache_key
+        if os.path.exists(cache_path):
+            soft_labels = torch.load(cache_path, weights_only=False)
+            if len(soft_labels) == len(final_frames):
+                return [
+                    (soft_labels[i], frame[1], frame[2], frame[3], frame[4])
+                    for i, frame in enumerate(final_frames)
+                ]
+
+    labels = [frame[0] for frame in final_frames]
+    left_features = []
+    right_features = []
+    for _, left_jpeg, right_jpeg, _, _ in final_frames:
+        left_features.append(_soft_label_feature(left_jpeg))
+        right_features.append(_soft_label_feature(right_jpeg))
+
+    features = np.concatenate([np.stack(left_features), np.stack(right_features)], axis=1)
+    features = (features - np.mean(features, axis=0, keepdims=True)) / (np.std(features, axis=0, keepdims=True) + 1e-4)
+
+    states = np.array([label[16] for label in labels], dtype=np.int64)
+    neutral_mask = (states & FLAG_GAZE_DATA) != 0
+    closed_mask = np.array([(label[9] < 0.5 or label[10] < 0.5) for label in labels], dtype=bool)
+    widen_mask = np.array([label[13] > 0.5 for label in labels], dtype=bool)
+    squint_mask = np.array([label[14] > 0.5 for label in labels], dtype=bool)
+    brow_mask = np.array([label[12] > 0.5 for label in labels], dtype=bool)
+
+    closed_scores = _prototype_soft_scores(features, neutral_mask, closed_mask)
+    widen_scores = _prototype_soft_scores(features, neutral_mask, widen_mask)
+    squint_scores = _prototype_soft_scores(features, neutral_mask, squint_mask)
+    brow_scores = _prototype_soft_scores(features, neutral_mask, brow_mask)
+
+    soft_labels = []
+    for i, label in enumerate(labels):
+        label = list(label)
+        label[9] = float(1.0 - closed_scores[i])   # routine_left_lid
+        label[10] = float(1.0 - closed_scores[i])  # routine_right_lid
+        label[12] = float(brow_scores[i])          # routine_brow_angry
+        label[13] = float(widen_scores[i])         # routine_widen
+        label[14] = float(squint_scores[i])        # routine_squint
+        soft_labels.append(tuple(label))
+
+    if cache_path is not None:
+        torch.save(soft_labels, cache_path)
+
+    return [
+        (soft_labels[i], frame[1], frame[2], frame[3], frame[4])
+        for i, frame in enumerate(final_frames)
+    ]
+
+
 def read_capture_file(filename, exclude_after=0, exclude_before=0):
     """
     Optimized frame alignment using advanced pattern-based algorithm
@@ -757,6 +870,8 @@ def read_capture_file(filename, exclude_after=0, exclude_before=0):
     # Remove first 3 frames (which don't have complete previous frame context)
     final_frames = final_frames[3:] if len(final_frames) > 3 else []
 
+    final_frames = apply_soft_expression_labels(final_frames, cache_key=crc)
+
     return final_frames
 
 # CaptureFrame structure
@@ -884,13 +999,13 @@ class CaptureDataset(Dataset):
 
             if is_gaze_frame:
                 self.aligned_frames_gaze.append(i)
-            elif routine_left_lid < 0.5 or routine_right_lid < 0.5:
+            elif routine_left_lid < 0.95 or routine_right_lid < 0.95:
                 self.aligned_frames_eyes_closed.append(i)
-            elif routine_squint > 0.5:
+            elif routine_squint > 0.05:
                 self.aligned_frames_eyes_squinted.append(i)
-            elif routine_widen > 0.5:
+            elif routine_widen > 0.05:
                 self.aligned_frames_eyes_wide.append(i)
-            elif routine_brow_angry > 0.5:
+            elif routine_brow_angry > 0.05:
                 self.aligned_frames_brow_raised.append(i)
 
 
@@ -918,27 +1033,27 @@ class CaptureDataset(Dataset):
     def get_next_gaze(self):
         target = np.argmin(self.use_count_gaze)
         self.use_count_gaze[target] += 1
-        return self.__getitem__(target)
+        return self.__getitem__(self.aligned_frames_gaze[target])
     
     def get_next_squint(self):
         target = np.argmin(self.use_count_squint)
         self.use_count_squint[target] += 1
-        return self.__getitem__(target)
+        return self.__getitem__(self.aligned_frames_eyes_squinted[target])
 
     def get_next_closed(self):
         target = np.argmin(self.use_count_closed)
         self.use_count_closed[target] += 1
-        return self.__getitem__(target)
+        return self.__getitem__(self.aligned_frames_eyes_closed[target])
     
     def get_next_wide(self):
         target = np.argmin(self.use_count_wide)
         self.use_count_wide[target] += 1
-        return self.__getitem__(target)
+        return self.__getitem__(self.aligned_frames_eyes_wide[target])
     
     def get_next_angry(self):
         target = np.argmin(self.use_count_angry)
         self.use_count_angry[target] += 1
-        return self.__getitem__(target)
+        return self.__getitem__(self.aligned_frames_brow_raised[target])
     
     def __getitem__(self, idx):
         # Extract data from the aligned frame
@@ -1167,6 +1282,12 @@ def batcher_gaze(train_loader):
     f = random.random()
     if f > 0.8:
         return train_loader.get_next_closed()
+    elif f > 0.72:
+        return train_loader.get_next_squint()
+    elif f > 0.64:
+        return train_loader.get_next_wide()
+    elif f > 0.56:
+        return train_loader.get_next_angry()
     else:
         return train_loader.get_next_gaze()
 
@@ -1225,6 +1346,12 @@ FLAG_GOOD_DATA = 1 << 30  # 1073741824
 FLAG_GAZE_DATA = 1 << 0
 
 TRAINING = True
+
+# Derive smooth expression targets from the actual calibration eye images.
+# This keeps binary routine labels as segment masks, but replaces the hard
+# 0/1 training targets with prototype-projection intensities inside each segment.
+USE_SOFT_EXPRESSION_LABELS = True
+SOFT_LABEL_SMOOTHING_WINDOW = 31
 
 # SigReg regularization on encoder features before the final linear layer.
 # Keep the weight small because the loss is batch-scaled in Algorithm 1.
