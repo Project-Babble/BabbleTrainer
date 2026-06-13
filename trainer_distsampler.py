@@ -15,10 +15,12 @@ import os
 import time
 import json
 
-
-import torch_directml
-
-device = torch_directml.device()
+if sys.platform == 'win32':
+    import torch_directml
+    device = torch_directml.device()
+else:
+    import torch
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def calculate_row_pattern_consistency(image):
